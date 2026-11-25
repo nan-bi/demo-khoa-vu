@@ -42,7 +42,7 @@ export function createLocalDictation({onText,onInterim,onState,onNotice,
      // Never deduplicate words: repetitions or corrections may be intentional.
      if(previewSegment===task.id){onInterim('');previewSegment=null;}
      if(text)onText(text);
-     if(task.final&&result.needs_review){
+     if(result.needs_review){
       onQuality({level:result.quality||'low',reason:result.quality_reason||'Đoạn nhận dạng cần bác sĩ kiểm tra.'});
      }
      queue.shift();

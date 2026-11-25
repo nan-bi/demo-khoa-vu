@@ -58,20 +58,16 @@ _TERM_CORRECTIONS: list[tuple[re.Pattern, str]] = [
     # Laterality (high-risk; only correct obvious phonetic swaps)
     (re.compile(r'\bphải\s+trái\b', re.I), 'phải-trái'),   # keeps both, adds dash
     # Common clinical abbreviations spoken phonetically
-    (re.compile(r'\bác\s+tính\b', re.I), 'ác tính'),
     (re.compile(r'\blành\s+tin\b', re.I), 'lành tính'),
     (re.compile(r'\bkhôi\b', re.I), 'khối'),
     # Numbers spoken as words → digits (only clear, single digit words)
-    (re.compile(r'\bmột\s+(mm|cm)\b', re.I), r'1 \1'),
-    (re.compile(r'\bhai\s+(mm|cm)\b', re.I), r'2 \1'),
-    (re.compile(r'\bba\s+(mm|cm)\b', re.I), r'3 \1'),
-    (re.compile(r'\bbốn\s+(mm|cm)\b', re.I), r'4 \1'),
-    (re.compile(r'\bnăm\s+(mm|cm)\b', re.I), r'5 \1'),
-    (re.compile(r'\bsáu\s+(mm|cm)\b', re.I), r'6 \1'),
-    (re.compile(r'\bbảy\s+(mm|cm)\b', re.I), r'7 \1'),
-    (re.compile(r'\btám\s+(mm|cm)\b', re.I), r'8 \1'),
-    (re.compile(r'\bchín\s+(mm|cm)\b', re.I), r'9 \1'),
-    (re.compile(r'\bmười\s+(mm|cm)\b', re.I), r'10 \1'),
+    *[
+        (re.compile(rf'\b{word}\s+(mm|cm)\b', re.I), rf'{digit} \1')
+        for word, digit in (
+            ('một', '1'), ('hai', '2'), ('ba', '3'), ('bốn', '4'), ('năm', '5'),
+            ('sáu', '6'), ('bảy', '7'), ('tám', '8'), ('chín', '9'), ('mười', '10'),
+        )
+    ],
 ]
 
 # ---------------------------------------------------------------------------
@@ -101,7 +97,6 @@ def postprocess(text: str) -> dict:
     if not text or not text.strip():
         return {'text': text, 'corrections': [], 'flags': ['Đoạn trống hoặc chỉ có khoảng trắng.']}
 
-    original = text
     corrections: list[str] = []
     flags: list[str] = []
 
@@ -125,12 +120,7 @@ def postprocess(text: str) -> dict:
 
     # -- Step 3: medical term corrections
     for pattern, replacement in _TERM_CORRECTIONS:
-        def _replace_term(m: re.Match, r: str = replacement, pat: re.Pattern = pattern) -> str:
-            result = pat.sub(r, m.group(0))
-            corrections.append(f"Thuật ngữ: '{m.group(0)}' → '{result}'")
-            return result
-        new_text = pattern.sub(lambda m: _sub_and_log(m, replacement, corrections), text)
-        text = new_text
+        text = pattern.sub(lambda m: _sub_and_log(m, replacement, corrections), text)
 
     # -- Step 4: quality flags (never change text, just warn)
     if not _HAS_VI_DIACRITIC.search(text) and len(text) > 10:
@@ -138,9 +128,6 @@ def postprocess(text: str) -> dict:
 
     if _is_repetitive(text):
         flags.append('Lặp từ bất thường: có thể là ảo giác (hallucination) của model. Soát kỹ hoặc yêu cầu đọc lại.')
-
-    if original == text:
-        pass  # no changes needed
 
     return {'text': text.strip(), 'corrections': corrections, 'flags': flags}
 
@@ -152,21 +139,3 @@ def _sub_and_log(m: re.Match, replacement: str, log: list[str]) -> str:
     if result != m.group(0):
         log.append(f"Thuật ngữ: '{m.group(0)}' → '{result}'")
     return result
-
-
-if __name__ == '__main__':
-    # Quick self-test
-    cases = [
-        ("Khối 12 mi li mét nhân 8 mi li mét tại vú phải, siêu am không phát hiện bai rát 4.", {}),
-        ("Sinh tiệc lành tính, siêu âm bi rát 3.", {}),
-        ("khôi kích thước mười hai mi li mét.", {}),
-    ]
-    for text, _ in cases:
-        r = postprocess(text)
-        print('IN :', text)
-        print('OUT:', r['text'])
-        if r['corrections']:
-            print('FIX:', r['corrections'])
-        if r['flags']:
-            print('FLAG:', r['flags'])
-        print()

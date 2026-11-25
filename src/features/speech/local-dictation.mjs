@@ -42,8 +42,8 @@ export function createLocalDictation({onText,onInterim,onState,onNotice,
      // Never deduplicate words: repetitions or corrections may be intentional.
      if(previewSegment===task.id){onInterim('');previewSegment=null;}
      if(text)onText(text);
-     if(result.needs_review){
-      onQuality({level:result.quality||'low',reason:result.quality_reason||'Đoạn nhận dạng cần bác sĩ kiểm tra.'});
+     if(result.needs_review||(result.corrections&&result.corrections.length)){
+      onQuality({level:result.quality||(result.needs_review?'low':'ok'),reason:result.quality_reason||'Đã chuẩn hóa thuật ngữ; soát lại trước khi lưu.',confidence:result.confidence??null,corrections:result.corrections||[],rawText:result.raw_text||null,accentRegion:result.accent_region||null,text});
      }
      queue.shift();
     }else{previewSegment=task.id;onInterim(text);}

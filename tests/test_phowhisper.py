@@ -67,7 +67,13 @@ class PhoWhisperTests(unittest.TestCase):
         quality = server.assess_quality([uncertain], 'Vú trái không thấy khối.')
         self.assertTrue(quality['needs_review'])
         self.assertEqual(quality['level'], 'low')
-        self.assertEqual(server.assess_quality([], '')['level'], 'silent')
+        self.assertLess(quality['confidence'], 0.75)
+        silent = server.assess_quality([], '')
+        self.assertEqual(silent['level'], 'silent')
+        self.assertEqual(silent['confidence'], 0.0)
+        ok = server.assess_quality([types.SimpleNamespace(no_speech_prob=0.05, avg_logprob=-0.1, compression_ratio=1.0)], 'Vú phải bình thường.')
+        self.assertFalse(ok['needs_review'])
+        self.assertGreaterEqual(ok['confidence'], 0.90)
 
     def test_vad_options_configured_for_noisy_rapid_speech(self):
         opts = speech_config.decode_options(True)

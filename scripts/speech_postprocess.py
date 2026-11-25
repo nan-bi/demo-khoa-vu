@@ -6,6 +6,11 @@ Design rules (medical safety):
 - Every substitution is logged to `corrections` list for physician review.
 - Do NOT change negation words, laterality, or numbers unless the pattern is unambiguous.
 - Rules are deterministic: same input always yields same output (no AI guessing).
+
+Regional accent coverage (v2):
+  Southern: s/x swap, hỏi↔sắc/ngã conflation, dropped tone marks, cuối từ ng→n
+  Central : ươ↔ơ collapse, ô/o short, ai/ơi swap in some clusters
+  Northern: d/gi/r homophones, final ng elision, ă/â conflation
 """
 from __future__ import annotations
 import re
@@ -21,23 +26,96 @@ _UNIT_ALIASES = {
     'micrô mét': 'µm', 'micromet': 'µm',
 }
 
-# Pattern: "12 mi li mét" → "12 mm"  (number + unit alias)
 _UNIT_PATTERN = re.compile(
     r'(\d+(?:[.,]\d+)?)\s+(' + '|'.join(re.escape(k) for k in _UNIT_ALIASES) + r')',
     re.IGNORECASE | re.UNICODE,
 )
 
-# Pattern: "12 x 8 mm" or "12 mm x 8 mm" → keep as-is (already correct)
-# Pattern: "12 nhân 8 mm" → "12 × 8 mm"
 _TIMES_PATTERN = re.compile(
     r'(\d+(?:[.,]\d+)?\s*(?:mm|cm|µm)?)\s+(?:nhân|x|×|X)\s+(\d+(?:[.,]\d+)?\s*(?:mm|cm|µm)?)',
     re.IGNORECASE,
 )
 
 # ---------------------------------------------------------------------------
-# 2. Medical term corrections (phonetic near-misses only)
-#    Key: lowercase regex pattern  Value: replacement (preserve case of first word)
-#    SAFETY: only unambiguous one-to-one phonetic errors are listed here.
+# 2. Regional accent phonetic substitution rules
+#    Applied BEFORE general term corrections so the resulting canonical form
+#    can then be caught by the medical-term rules below.
+#    Keys are lowercase regex; values are canonical replacements.
+#    SAFETY: only unambiguous one-to-one phoneme errors listed here.
+# ---------------------------------------------------------------------------
+
+# -- 2a. Southern Vietnamese (Miền Nam) --
+# s ↔ x word-initial swap in medical words
+# hỏi ↔ sắc tone conflation on specific syllables
+# Word-final 'ng' ↓ n (e.g. "khôn" → "không")
+_SOUTHERN_RULES: list[tuple[re.Pattern, str]] = [
+    # "siêu xm" / "xâu âm" → "siêu âm" (x/s swap)
+    (re.compile(r'\bxiêu\s+âm\b', re.I | re.U), 'siêu âm'),
+    (re.compile(r'\bsiêu\s+xm\b', re.I | re.U), 'siêu âm'),
+    # "xét nghiêm" → "xét nghiệm" (dropped diacritics in final syllable)
+    (re.compile(r'\bxét\s+nghiêm\b', re.I | re.U), 'xét nghiệm'),
+    # "sinh tiêt" → "sinh thiết" (s/th swap, missing tone)
+    (re.compile(r'\bsinh\s+ti[eê]t\b', re.I | re.U), 'sinh thiết'),
+    # "u xơ" → "u xơ" is correct; but "u sơ" is Southern slip
+    (re.compile(r'\bu\s+sơ\b', re.I | re.U), 'u xơ'),
+    # "khôn" → "không" (dropped final ng)
+    (re.compile(r'\bkhôn\b(?!\s+khổ)', re.I | re.U), 'không'),
+    # "nhủ hoa" → "nhũ hoa" (hỏi→ngã flip)
+    (re.compile(r'\bnhủ\s+hoa\b', re.I | re.U), 'nhũ hoa'),
+    # "vú phải" mis-heard as "bú phải" (b/v swap – Southern labial)
+    (re.compile(r'\bbú\s+(phải|trái|hai)\b', re.I | re.U), r'vú \1'),
+    # "ác tinh" / "ac tính" → "ác tính"
+    (re.compile(r'\bác\s+tinh\b', re.I | re.U), 'ác tính'),
+    (re.compile(r'\bac\s+tính\b', re.I | re.U), 'ác tính'),
+    # "lanh tinh" → "lành tính" (muted diacritics)
+    (re.compile(r'\blanh\s+tinh\b', re.I | re.U), 'lành tính'),
+    # "cục" mis-heard as "gục" (g/c initial – Southern cluster)
+    (re.compile(r'\bgục\s+(u\b|nhỏ\b|lớn\b)', re.I | re.U), r'cục \1'),
+    # "nốt" missed accent: "not vôi" → "nốt vôi"
+    (re.compile(r'\bnot\s+vôi\b', re.I | re.U), 'nốt vôi'),
+]
+
+# -- 2b. Central Vietnamese (Miền Trung) --
+# ươ↔ơ collapse, ai/ơi/i conflation in certain positions
+_CENTRAL_RULES: list[tuple[re.Pattern, str]] = [
+    # "bướu" → "bướu" correct; "bưu" → "bướu" (Central drops ơ in ươ)
+    (re.compile(r'\bbưu\b', re.I | re.U), 'bướu'),
+    # "khôi u" → "khối u"
+    (re.compile(r'\bkhôi\s+u\b', re.I | re.U), 'khối u'),
+    # "siêu ôm" → "siêu âm" (ô/â Central conflation)
+    (re.compile(r'\bsiêu\s+ôm\b', re.I | re.U), 'siêu âm'),
+    # "giải fẫu" → "giải phẫu" (ph→f Central)
+    (re.compile(r'\bgiải\s+f[aăâ]u\b', re.I | re.U), 'giải phẫu'),
+    # "manh" → "mạnh" (dropped subdot – tone mark elision)
+    (re.compile(r'\bsinh\s+manh\b', re.I | re.U), 'sinh mạnh'),
+    # "u lành" mispronounced "u lanh" in Central
+    (re.compile(r'\bu\s+lanh\b', re.I | re.U), 'u lành'),
+    # "nang" → "nang" (correct); but "năng" → "nang" (Central ă→a)
+    (re.compile(r'\bnăng\s+(nước|đơn|đôi)\b', re.I | re.U), r'nang \1'),
+]
+
+# -- 2c. Northern Vietnamese (Miền Bắc) --
+# d/gi/r triphone, final ng elision specific forms, ă/â conflation
+_NORTHERN_RULES: list[tuple[re.Pattern, str]] = [
+    # "giải phẫu" mis-heard as "dải phẫu" or "rải phẫu" (d/gi/r homophones)
+    (re.compile(r'\b[dr]ải\s+phẫu\b', re.I | re.U), 'giải phẫu'),
+    # "dópler" / "rópler" → "Doppler"
+    (re.compile(r'\b[dr]óp\s*l[eơ]r?\b', re.I | re.U), 'Doppler'),
+    # "xét nghiem" → "xét nghiệm" (ê/iê Northern merge)
+    (re.compile(r'\bxét\s+nghiem\b', re.I | re.U), 'xét nghiệm'),
+    # "nhân" → "nhân" correct but "nhăn" can appear
+    (re.compile(r'(\d+)\s+nhăn\s+(\d+)', re.I | re.U), r'\1 × \2'),
+    # "giải fẫu bệnh" → "giải phẫu bệnh"
+    (re.compile(r'\bgiải\s+f[âa]u\s+bệnh\b', re.I | re.U), 'giải phẫu bệnh'),
+    # "u vú" → "u vú" (correct); "u dú" Northern d/v swap
+    (re.compile(r'\bu\s+dú\b', re.I | re.U), 'u vú'),
+    # "bírát" → "BI-RADS" (Northern rhotacism + no tone marks)
+    (re.compile(r'\bbirát\b', re.I | re.U), 'BI-RADS'),
+]
+
+# ---------------------------------------------------------------------------
+# 3. Medical term corrections (phonetic near-misses only — applies after accent)
+#    SAFETY: only unambiguous one-to-one phonetic errors listed here.
 # ---------------------------------------------------------------------------
 _TERM_CORRECTIONS: list[tuple[re.Pattern, str]] = [
     # Bi-rad / BI-RADS scoring
@@ -64,12 +142,13 @@ _TERM_CORRECTIONS: list[tuple[re.Pattern, str]] = [
 ]
 
 # ---------------------------------------------------------------------------
-# 3. Sentence-level quality heuristics (non-rewriting checks)
+# 4. Sentence-level quality heuristics (non-rewriting checks)
 # ---------------------------------------------------------------------------
-# Flag if no Vietnamese tone mark at all (possible garbled noise output)
-_HAS_VI_DIACRITIC = re.compile(r'[àáảãạăắặằẳẵâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]', re.UNICODE)
+_HAS_VI_DIACRITIC = re.compile(
+    r'[àáảãạăắặằẳẵâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]',
+    re.UNICODE,
+)
 
-# Flag if pure repetition (Whisper hallucination artifact)
 def _is_repetitive(text: str, threshold: float = 0.6) -> bool:
     words = text.lower().split()
     if len(words) < 6:
@@ -77,21 +156,40 @@ def _is_repetitive(text: str, threshold: float = 0.6) -> bool:
     unique = len(set(words))
     return unique / len(words) < (1 - threshold)
 
+# Confidence score (0.0–1.0) based on how many corrections were needed.
+# Used by the server to decide whether to set needs_review.
+def _confidence_score(raw: str, corrected: str, corrections: list[str], flags: list[str]) -> float:
+    if flags:
+        return 0.40
+    if not corrections:
+        return 0.95
+    # Each correction reduces confidence proportionally
+    penalty = min(0.08 * len(corrections), 0.45)
+    return round(max(0.50, 0.95 - penalty), 2)
+
+
+# ---------------------------------------------------------------------------
+# 5. Public API
+# ---------------------------------------------------------------------------
 
 def postprocess(text: str) -> dict:
     """
     Returns:
         {
           'text': str,              # corrected transcript
-          'corrections': list[str], # human-readable log of changes
+          'corrections': list[str], # human-readable log of changes (for physician)
           'flags': list[str],       # quality warnings for physician review
+          'confidence': float,      # 0.0–1.0 post-correction confidence estimate
+          'accent_region': str|None # detected accent region if any rule fired
         }
     """
     if not text or not text.strip():
-        return {'text': text, 'corrections': [], 'flags': ['Đoạn trống hoặc chỉ có khoảng trắng.']}
+        return {'text': text, 'corrections': [], 'flags': ['Đoạn trống hoặc chỉ có khoảng trắng.'],
+                'confidence': 0.0, 'accent_region': None}
 
     corrections: list[str] = []
     flags: list[str] = []
+    raw = text
 
     # -- Step 1: unit alias normalization
     def _replace_unit(m: re.Match) -> str:
@@ -111,23 +209,47 @@ def postprocess(text: str) -> dict:
 
     text = _TIMES_PATTERN.sub(_replace_times, text)
 
-    # -- Step 3: medical term corrections
-    for pattern, replacement in _TERM_CORRECTIONS:
-        text = pattern.sub(lambda m: _sub_and_log(m, replacement, corrections), text)
+    # -- Step 3: regional accent rules (run all; track which region fired)
+    accent_fired: dict[str, int] = {}
+    for label, rules in (('Nam', _SOUTHERN_RULES), ('Trung', _CENTRAL_RULES), ('Bắc', _NORTHERN_RULES)):
+        for pattern, replacement in rules:
+            before = text
+            text = pattern.sub(lambda m, r=replacement: _sub_and_log(m, r, corrections), text)
+            if text != before:
+                accent_fired[label] = accent_fired.get(label, 0) + 1
 
-    # -- Step 4: quality flags (never change text, just warn)
+    accent_region: str | None = None
+    if accent_fired:
+        accent_region = max(accent_fired, key=accent_fired.get)
+        flags.append(
+            f"Phát hiện đặc điểm giọng Miền {accent_region} "
+            f"({accent_fired[accent_region]} chỉnh sửa). Soát lại trước khi lưu."
+        )
+
+    # -- Step 4: medical term corrections
+    for pattern, replacement in _TERM_CORRECTIONS:
+        text = pattern.sub(lambda m, r=replacement: _sub_and_log(m, r, corrections), text)
+
+    # -- Step 5: quality flags (never change text, just warn)
     if not _HAS_VI_DIACRITIC.search(text) and len(text) > 10:
         flags.append('Không có dấu tiếng Việt: có thể ghi âm bị nhiễu hoặc model nhầm ngôn ngữ. Soát lại.')
 
     if _is_repetitive(text):
         flags.append('Lặp từ bất thường: có thể là ảo giác (hallucination) của model. Soát kỹ hoặc yêu cầu đọc lại.')
 
-    return {'text': text.strip(), 'corrections': corrections, 'flags': flags}
+    confidence = _confidence_score(raw, text, corrections, flags)
+
+    return {
+        'text': text.strip(),
+        'corrections': corrections,
+        'flags': flags,
+        'confidence': confidence,
+        'accent_region': accent_region,
+    }
 
 
 def _sub_and_log(m: re.Match, replacement: str, log: list[str]) -> str:
     """Apply substitution and append to log."""
-    # Handle backreferences in replacement like r'1 \1'
     result = m.re.sub(replacement, m.group(0))
     if result != m.group(0):
         log.append(f"Thuật ngữ: '{m.group(0)}' → '{result}'")

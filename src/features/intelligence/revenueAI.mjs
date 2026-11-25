@@ -2,6 +2,7 @@
 // Money, patient identities, filenames and clinical findings never enter training.
 import {department,ROUTES} from './routing.mjs';
 export const AI_VERSION='VU-REVENUE-NB-1';
+export const CONFIDENCE_THRESHOLD=0.75;
 export const normalizeDept=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toUpperCase().trim().replace(/\s+/g,' ');
 const names={'KHOA VU':'VU','CHUYEN KHOA VU':'VU','KHOA CHAN DOAN HINH ANH':'CDHA','TRUNG TAM CHAN DOAN HINH ANH':'CDHA','KHOA XET NGHIEM':'XETNGHIEM','TRUNG TAM XET NGHIEM':'XETNGHIEM','KHOA SUC KHOE TONG QUAT':'KSKTQ','SUC KHOE TONG QUAT':'KSKTQ','KHOA UNG BUOU':'UNGBUOU'};
 export const resolveDept=v=>department(v)||names[normalizeDept(v)]||null;
@@ -68,10 +69,10 @@ export function trainRevenueModel(examples=[]){
 export function predictRevenue(row,model){
  const scores=ROUTES.map(label=>({label,score:Math.log((model.documents[label]+1)/(model.trainingCount+ROUTES.length))+tokens(row).filter(t=>model.vocabulary.has(t)).reduce((n,t)=>n+Math.log(((model.counts[label].get(t)||0)+1)/(model.totals[label]+model.vocabulary.size)),0)})).sort((a,b)=>b.score-a.score);
  const denominator=scores.reduce((n,x)=>n+Math.exp(x.score-scores[0].score),0);
- const a=resolveDept(row.ordering_dept),b=resolveDept(row.performing_dept),known=route(a,b),review=model.examples.get(pairKey(row)),label=known||review?.label||null;
- return {label,suggestion:scores[0].label,score:1/denominator,source:known?'Danh mục khoa chuẩn':review?'Cặp khoa đã xác nhận':'AI gợi ý · cần xác nhận',included:['VU_INTERNAL','VU_OUTBOUND'].includes(label),pending:!label,version:AI_VERSION};
+ const a=resolveDept(row.ordering_dept),b=resolveDept(row.performing_dept),known=route(a,b),review=model.examples.get(pairKey(row)),label=known||review?.label||null,score=1/denominator,source=known?'Danh mục khoa chuẩn':review?'Cặp khoa đã xác nhận':'AI gợi ý · cần xác nhận',needs_review=!label||(source.startsWith('AI')&&score<CONFIDENCE_THRESHOLD);
+ return {label,suggestion:scores[0].label,score,confidence:score,needs_review,source,included:['VU_INTERNAL','VU_OUTBOUND'].includes(label),pending:!label,version:AI_VERSION};
 }
 export function revenueScope(rows,config={}){
  const model=trainRevenueModel(config.routingExamples||[]),records=rows.map(row=>({row,...predictRevenue(row,model)}));
- return {model,records,included:records.filter(r=>r.included).map(r=>r.row),pending:records.filter(r=>r.pending),excluded:records.filter(r=>!r.pending&&!r.included)};
+ return {model,records,included:records.filter(r=>r.included).map(r=>r.row),pending:records.filter(r=>r.pending),needsReview:records.filter(r=>r.needs_review),excluded:records.filter(r=>!r.pending&&!r.included)};
 }

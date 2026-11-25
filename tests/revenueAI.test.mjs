@@ -105,3 +105,17 @@ test('Backend persists training labels with audit, blocks pending revenue and re
   state.serviceCalculation.routingExamples=[];await assert.rejects(()=>updateWorkspace(app.db,{expectedRevision:state.revision,state},user,catalog),/khóa/);
  }finally{await app.close();fs.rmSync(tmp,{recursive:true,force:true});}
 });
+test('Unknown or low-confidence department pairs always trigger needs_review and appear in scope.needsReview',async()=>{
+ const {CONFIDENCE_THRESHOLD}=await import('../src/features/intelligence/revenueAI.mjs');
+ assert.equal(CONFIDENCE_THRESHOLD,0.75);
+ const rows=[
+  {...base(),ordering_dept:'VU',performing_dept:'CDHA'},
+  {...base(),order_id:'O-UNK',visit_id:'V-UNK',ordering_dept:'Đơn vị lạ XYZ',performing_dept:'Phòng ABC'},
+ ];
+ const s=revenueScope(rows);
+ assert.equal(s.records[0].needs_review,false);
+ assert.equal(s.records[1].needs_review,true);
+ assert.equal(s.needsReview.length,1);
+ assert.equal(s.needsReview[0].row.order_id,'O-UNK');
+ assert.ok(Number.isFinite(s.records[1].confidence));
+});

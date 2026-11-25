@@ -70,25 +70,36 @@ def transcribe(data, final=True):
     # Post-process: normalize medical terminology and measurement units.
     # Corrections are logged for physician review; clinical text is never
     # silently altered without an explicit, deterministic, logged rule.
-    post = postprocess(raw_text) if final else {'text': raw_text, 'corrections': [], 'flags': []}
+    post = postprocess(raw_text) if final else {'text': raw_text, 'corrections': [], 'flags': [], 'confidence': 0.95, 'accent_region': None}
     text = post['text']
 
-    quality = assess_quality(decoded, text, post['flags'])
+    quality = assess_quality(decoded, text, post['flags'], post.get('confidence', 0.95))
     return {'text': text, 'seconds': round(time.perf_counter() - started, 3),
             'model': state['model'], 'revision': PROFILE['revision'], 'final': final,
             'needs_review': quality['needs_review'], 'quality': quality['level'],
             'quality_reason': quality['reason'],
+            'confidence': quality['confidence'],
             'corrections': post['corrections'],
+            'accent_region': post.get('accent_region'),
             'raw_text': raw_text if post['corrections'] else None}
 
 
-def assess_quality(segments, text, postprocess_flags=None):
-    """Surface uncertainty; never rewrite clinical terms automatically."""
+def assess_quality(segments, text, postprocess_flags=None, postprocess_confidence=0.95):
+    """Surface uncertainty; never rewrite clinical terms automatically.
+
+    confidence: float returned in every response so the UI can show a badge.
+    Rules (priority order):
+      1. Empty / silent → needs_review, confidence 0.0
+      2. Postprocess flags (accent or hallucination) → needs_review, use postprocess_confidence
+      3. Whisper internals: high no_speech_prob, very negative avg_logprob, compression_ratio spike
+      4. Mild no_speech_prob → caution
+      5. All clear → ok
+    """
     if not text.strip():
-        return {'level': 'silent', 'needs_review': True,
+        return {'level': 'silent', 'needs_review': True, 'confidence': 0.0,
                 'reason': 'Không phát hiện lời đọc rõ ràng hoặc đoạn chỉ có im lặng.'}
     if postprocess_flags:
-        return {'level': 'caution', 'needs_review': True,
+        return {'level': 'caution', 'needs_review': True, 'confidence': postprocess_confidence,
                 'reason': 'Hậu xử lý phát hiện bất thường: ' + '; '.join(postprocess_flags)}
     probs = [getattr(segment, 'no_speech_prob', None) for segment in segments]
     probs = [prob for prob in probs if isinstance(prob, (int, float))]
@@ -97,14 +108,20 @@ def assess_quality(segments, text, postprocess_flags=None):
     ratios = [getattr(segment, 'compression_ratio', None) for segment in segments]
     ratios = [ratio for ratio in ratios if isinstance(ratio, (int, float))]
     if ((probs and max(probs) >= 0.60)
-            or (log_probs and max(log_probs) < -1.20)
-            or (ratios and max(ratio for ratio in ratios) >= 2.40)):
-        return {'level': 'low', 'needs_review': True,
+            or (log_probs and min(log_probs) < -1.20)
+            or (ratios and max(ratios) >= 2.40)):
+        # Estimate confidence from avg_logprob when available (logprob → probability)
+        import math
+        conf = round(math.exp(sum(log_probs) / len(log_probs)), 3) if log_probs else 0.35
+        conf = max(0.10, min(0.55, conf))
+        return {'level': 'low', 'needs_review': True, 'confidence': conf,
                 'reason': 'Đoạn có tín hiệu nhận dạng không ổn định; phải soát kỹ bên, phủ định, số đo và đơn vị.'}
     if probs and max(probs) >= 0.35:
-        return {'level': 'caution', 'needs_review': True,
+        return {'level': 'caution', 'needs_review': True, 'confidence': 0.65,
                 'reason': 'Có khả năng im lặng hoặc từ không rõ; kiểm tra lại đoạn nhận dạng.'}
-    return {'level': 'ok', 'needs_review': False, 'reason': ''}
+    # All clear – blend postprocess confidence with Whisper signal
+    final_conf = round(postprocess_confidence * 0.9 + 0.95 * 0.1, 3) if postprocess_confidence < 0.95 else 0.95
+    return {'level': 'ok', 'needs_review': False, 'confidence': final_conf, 'reason': ''}
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):

@@ -78,6 +78,29 @@ class PostprocessTests(unittest.TestCase):
         r = postprocess("Phát hiện khôi kích thước nhỏ.")
         self.assertIn('khối', r['text'])
 
+    def test_southern_accent_rules_and_confidence(self):
+        r = postprocess("Xiêu âm bú phải thấy u sơ và nhủ hoa bình thường.")
+        self.assertIn('siêu âm', r['text'])
+        self.assertIn('vú phải', r['text'])
+        self.assertIn('u xơ', r['text'])
+        self.assertIn('nhũ hoa', r['text'])
+        self.assertEqual(r['accent_region'], 'Nam')
+        self.assertLess(r['confidence'], 0.95)
+        self.assertTrue(any('Miền Nam' in f for f in r['flags']))
+
+    def test_central_and_northern_accent_rules(self):
+        r_central = postprocess("Siêu ôm phát hiện bưu nhỏ và năng nước.")
+        self.assertIn('siêu âm', r_central['text'])
+        self.assertIn('bướu', r_central['text'])
+        self.assertIn('nang nước', r_central['text'])
+        self.assertEqual(r_central['accent_region'], 'Trung')
+
+        r_north = postprocess("Dải phẫu bệnh u dú kết quả birát 3.")
+        self.assertIn('giải phẫu', r_north['text'])
+        self.assertIn('u vú', r_north['text'])
+        self.assertIn('BI-RADS', r_north['text'])
+        self.assertEqual(r_north['accent_region'], 'Bắc')
+
 
 if __name__ == '__main__':
     unittest.main()

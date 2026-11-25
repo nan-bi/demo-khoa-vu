@@ -8,6 +8,7 @@ import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import numpy as np
 
 os.environ['HF_HUB_OFFLINE'] = '1'
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
@@ -40,10 +41,26 @@ def transcribe(data, final=True):
     with wave.open(io.BytesIO(data), 'rb') as audio:
         if (audio.getnchannels(), audio.getsampwidth(), audio.getframerate()) != (1, 2, 16000):
             raise ValueError('Expected mono PCM16 16kHz')
-        if not 0 < audio.getnframes() <= 30 * 16000:
+        nframes = audio.getnframes()
+        if not 0 < nframes <= 30 * 16000:
             raise ValueError('Audio duration out of range')
+        raw_frames = audio.readframes(nframes)
+    # Convert PCM16 to float32 samples [-1.0, 1.0]
+    samples = np.frombuffer(raw_frames, dtype=np.int16).astype(np.float32) / 32768.0
+
+    # 1. Attenuate low-frequency rumble and DC offset (fan motor / 50Hz AC hum < 85Hz)
+    if len(samples) >= 188:
+        rumble = np.convolve(samples, np.ones(188, dtype=np.float32) / 188.0, mode='same')
+        samples = samples - rumble
+
+    # 2. Dynamic gain boost for weak microphones (peak amplitude < 0.5)
+    peak = float(np.max(np.abs(samples))) if len(samples) else 0.0
+    if 0.01 < peak < 0.5:
+        # Scale up to 0.75 target, capped at 5x (+14 dB) to prevent clipping
+        samples = samples * min(0.75 / peak, 5.0)
+
     started = time.perf_counter()
-    segments, _ = model.transcribe(io.BytesIO(data), **decode_options(final))
+    segments, _ = model.transcribe(samples, **decode_options(final))
     decoded = list(segments)
     text = ' '.join(s.text.strip() for s in decoded).strip()
     quality = assess_quality(decoded, text)

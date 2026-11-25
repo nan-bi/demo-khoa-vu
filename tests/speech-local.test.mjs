@@ -17,7 +17,7 @@ function harness(replies=[]){
  const session=createLocalDictation({AudioContextClass:Audio,mediaDevices:{getUserMedia:async()=>({getTracks:()=>[{stop(){stopped++;}}]})},
   fetcher:async(url,options)=>{calls.push({url,options});if(url.endsWith('health'))return {ok:true,json:async()=>({ready:true})};return await replies.shift()();},
   onText:t=>texts.push(t),onState:s=>states.push(s),onInterim:t=>interims.push(t),onNotice(){}});
- return {session,texts,states,calls,interims,get stopped(){return stopped;},frame(seconds){processor.onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(seconds*16000).fill(.1)}});}};
+ return {session,texts,states,calls,interims,get stopped(){return stopped;},frame(seconds,amp=.1){processor.onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(seconds*16000).fill(amp)}});}};
 }
 const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
 test('stop drains final audio and keeps case locked until inference completes',async()=>{
@@ -96,4 +96,35 @@ test('preview uses fast decoding and final requests ask for careful decoding',as
  const h=harness([reply('Vú trái'),reply('Vú trái không có khối.')]);
  await h.session.start();h.frame(1.3);await tick();h.session.stop();await tick();
  assert.deepEqual(h.calls.filter(c=>c.url.endsWith('transcribe')).map(c=>c.options.headers['X-Vu-Final']),['0','1']);
+});
+
+test('biquad filter connects highpass when audio context supports it',async()=>{
+ let filterCreated=null;
+ class AudioWithFilter {
+  sampleRate=16000;destination={};resume(){return Promise.resolve();}close(){return Promise.resolve();}
+  createMediaStreamSource(){return {connect(){},disconnect(){}};}
+  createGain(){return {connect(){},disconnect(){},gain:{value:0}};}
+  createScriptProcessor(){return {connect(){},disconnect(){}};}
+  createBiquadFilter(){
+   filterCreated={type:'',frequency:{value:0},Q:{value:0},connect(){},disconnect(){}};
+   return filterCreated;
+  }
+ }
+ const s=createLocalDictation({AudioContextClass:AudioWithFilter,fetcher:async()=>({ok:true,json:async()=>({ready:true})}),mediaDevices:{getUserMedia:async()=>({getTracks:()=>[{stop(){}}]})},onText(){},onInterim(){},onState(){},onNotice(){}});
+ await s.start();
+ assert.ok(filterCreated);
+ assert.equal(filterCreated.type,'highpass');
+ assert.equal(filterCreated.frequency.value,85);
+ s.stop();
+});
+
+test('rapid speech boundary flushes at 450ms pause after 1.2s speech',async()=>{
+ const h=harness([reply('Khối kích thước'),reply('Khối kích thước nhỏ')]);
+ await h.session.start();
+ h.frame(1.3);
+ await tick();
+ h.frame(0.45,0.001);
+ await tick();
+ assert.deepEqual(h.texts,['Khối kích thước nhỏ']);
+ h.session.stop();
 });

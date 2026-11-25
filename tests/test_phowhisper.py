@@ -8,6 +8,7 @@ import types
 import unittest
 from unittest.mock import patch
 import wave
+import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import speech_config
@@ -68,5 +69,39 @@ class PhoWhisperTests(unittest.TestCase):
         self.assertTrue(quality['needs_review'])
         self.assertEqual(quality['level'], 'low')
         self.assertEqual(server.assess_quality([], '')['level'], 'silent')
+
+    def test_vad_options_configured_for_noisy_rapid_speech(self):
+        opts = speech_config.decode_options(True)
+        vad = opts['vad_parameters']
+        self.assertEqual(vad['threshold'], 0.45)
+        self.assertEqual(vad['min_speech_duration_ms'], 100)
+        self.assertEqual(vad['min_silence_duration_ms'], 450)
+        self.assertEqual(vad['speech_pad_ms'], 350)
+
+    def test_audio_preprocessing_gain_and_filter(self):
+        fake = types.ModuleType('faster_whisper')
+        fake.WhisperModel = object
+        with patch.dict(sys.modules, {'faster_whisper': fake}), patch.dict(os.environ, {'VU_VOICE_KEY':'unit-test-only'}):
+            spec = importlib.util.spec_from_file_location('speech_server_prep_test', ROOT / 'scripts/speech-server.py')
+            server = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(server)
+        captured = []
+        def transcribe(samples, **kwargs):
+            captured.append(samples)
+            return iter([types.SimpleNamespace(text='Test')]), None
+        server.model = types.SimpleNamespace(transcribe=transcribe)
+
+        audio = io.BytesIO()
+        import numpy as np
+        t = np.linspace(0, 0.1, 1600, dtype=np.float32)
+        sine = (0.05 * np.sin(2 * np.pi * 500 * t) + 0.02)
+        raw_int16 = (sine * 32767).astype(np.int16).tobytes()
+        with wave.open(audio, 'wb') as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(raw_int16)
+        server.transcribe(audio.getvalue(), final=True)
+
+        proc = captured[0]
+        self.assertAlmostEqual(float(np.mean(proc)), 0.0, places=2)
+        self.assertGreater(float(np.max(np.abs(proc))), 0.2)
 
 if __name__ == '__main__': unittest.main()

@@ -10,10 +10,10 @@ export function wavBlob(samples,sampleRate){
 
 export function createLocalDictation({onText,onInterim,onState,onNotice,
  fetcher=fetch,mediaDevices=navigator.mediaDevices,AudioContextClass=window.AudioContext,onQuality=()=>{}}){
- let context,stream,source,processor,mute,frames=[],length=0,silence=0,queue=[],working=false,recording=false,failed=false,disposed=false,starting=false,generation=0;
+ let context,stream,source,filter,processor,mute,frames=[],length=0,silence=0,noiseFloor=0.005,queue=[],working=false,recording=false,failed=false,disposed=false,starting=false,generation=0;
  let segment=0,lastPreviewLength=0,previewSegment=null;
  const state=value=>{if(!disposed)onState(value);};
- function release(){recording=false;processor?.disconnect();source?.disconnect();mute?.disconnect();stream?.getTracks().forEach(track=>track.stop());if(context)context.close().catch(()=>{});processor=source=mute=null;stream=null;}
+ function release(){recording=false;processor?.disconnect();filter?.disconnect();source?.disconnect();mute?.disconnect();stream?.getTracks().forEach(track=>track.stop());if(context)context.close().catch(()=>{});processor=source=mute=filter=null;stream=null;}
  function snapshot(){
   const samples=new Float32Array(length);let offset=0;for(const frame of frames){samples.set(frame,offset);offset+=frame.length;}
   return wavBlob(samples,context.sampleRate);
@@ -67,23 +67,31 @@ export function createLocalDictation({onText,onInterim,onState,onNotice,
     const response=await fetcher('/speech-api/health',{signal:AbortSignal.timeout(5000)}),health=await response.json();
     if(!response.ok||!health.ready)throw new Error(health.error||'Model đang khởi động, thử lại sau vài giây.');
     if(disposed||attempt!==generation)return;
-    acquired=await mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true},video:false});
+    acquired=await mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
     if(disposed||attempt!==generation){acquired.getTracks().forEach(track=>track.stop());return;}
     opened=new AudioContextClass({sampleRate:16000});await opened.resume();
     if(disposed||attempt!==generation){acquired.getTracks().forEach(track=>track.stop());await opened.close();return;}
     stream=acquired;context=opened;
-    source=context.createMediaStreamSource(stream);processor=context.createScriptProcessor(4096,1,1);mute=context.createGain();mute.gain.value=0;
-    source.connect(processor);processor.connect(mute);mute.connect(context.destination);
+    source=context.createMediaStreamSource(stream);
+    filter=typeof context.createBiquadFilter==='function'?context.createBiquadFilter():null;
+    if(filter){filter.type='highpass';filter.frequency.value=85;filter.Q.value=0.7;}
+    processor=context.createScriptProcessor(4096,1,1);mute=context.createGain();mute.gain.value=0;
+    if(filter){source.connect(filter);filter.connect(processor);}else{source.connect(processor);}
+    processor.connect(mute);mute.connect(context.destination);
     stream.getTracks().forEach(track=>{track.onended=()=>{if(recording){release();flush();state(queue.length||working?'stopping':'idle');onNotice('Micro đã ngắt. Đang chép nốt âm thanh đã thu.');}};});
-    frames=[];length=0;silence=0;lastPreviewLength=0;previewSegment=null;onInterim('');recording=true;failed=false;
+    frames=[];length=0;silence=0;noiseFloor=0.005;lastPreviewLength=0;previewSegment=null;onInterim('');recording=true;failed=false;
     processor.onaudioprocess=event=>{
      if(!recording)return;
      const frame=new Float32Array(event.inputBuffer.getChannelData(0));frames.push(frame);length+=frame.length;
      let energy=0;for(const x of frame)energy+=x*x;
-     silence=Math.sqrt(energy/frame.length)<0.008?silence+frame.length:0;
-     // Silence chooses a sentence boundary. Live hypotheses retain the full
-     // current segment for context; final segments cover every sample once.
-     if((length>=1.2*context.sampleRate&&silence>=.7*context.sampleRate)||length>=8*context.sampleRate)flush();
+     const rms=Math.sqrt(energy/frame.length);
+     if(rms<noiseFloor*1.5||noiseFloor===0.005){noiseFloor=noiseFloor*0.95+rms*0.05;}else{noiseFloor=noiseFloor*0.999+rms*0.001;}
+     noiseFloor=Math.max(0.003,Math.min(0.04,noiseFloor));
+     const silenceThreshold=Math.max(0.008,Math.min(0.035,noiseFloor*1.35));
+     silence=rms<silenceThreshold?silence+frame.length:0;
+     // Silence chooses a sentence boundary (shortened to 0.45s for rapid dictation).
+     // Live hypotheses retain the full current segment for context; final segments cover every sample once.
+     if((length>=1.2*context.sampleRate&&silence>=.45*context.sampleRate)||length>=8*context.sampleRate)flush();
      else if(previewReady())pump();
      if(queue.length>=5){release();flush();state('stopping');onNotice('Máy đang chép chậm hơn lời đọc. Micro đã dừng để xử lý hết các đoạn đang chờ.');}
     };

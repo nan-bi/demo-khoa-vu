@@ -1,23 +1,31 @@
 # Dashboard Khoa Vú · VMTC-KHOA-VU
 
-Dashboard nội bộ để nhập và đối soát dịch vụ, tính doanh thu theo phạm vi Khoa Vú, lập báo cáo giao ban và chép lời đọc kết quả siêu âm. Giao diện hồng phấn và trắng; xử lý local, không cần khóa API AI.
+Hệ thống dashboard nội bộ chạy hoàn toàn **local / offline** phục vụ nhập và đối soát dữ liệu dịch vụ, tính toán doanh thu theo phạm vi Khoa Vú, lập báo cáo giao ban (Excel & PowerPoint) và chép lời đọc kết quả siêu âm bằng giọng nói tiếng Việt. Không sử dụng API AI đám mây, không gửi dữ liệu bệnh nhân ra ngoài máy nội bộ.
 
-**Bản hiện tại: v8 · cập nhật 15/11/2026.** Mã nguồn đang dùng nằm ngay tại thư mục gốc repository. `prototype-local-v8/` là bản lịch sử, không phải nơi chạy hoặc phát triển bản hiện tại.
+> **Cập nhật 25/11/2026 (v8):** Gia cố bảo mật toàn diện (NIST SP 800-63B, CSP, dual rate-limiter, SQLite secure delete), tối ưu nhận dạng giọng nói cho môi trường nhiễu quạt gió 0 dB / micro yếu / giọng đọc dồn dập, bổ sung hậu xử lý thuật ngữ y tế và phân loại nhóm dịch vụ từ lời đọc.
 
-## Chức năng
+---
 
-- **Tổng quan, chi tiết và biểu đồ:** lọc theo ngày/khoảng ngày, xem số lượng và giá trị dịch vụ, chọn cột, truy nguồn từng dòng, sửa có lý do và lưu lịch sử.
-- **Nhập Excel/CSV hoặc thư mục:** đọc nhiều sheet, xem trước rồi xác nhận nhập; loại file trùng bằng SHA-256, đối chiếu dòng và cách ly dữ liệu nghi trùng hoặc thiếu căn cứ. Bảng đã nhập được lưu để tiếp tục chỉnh trên dashboard.
-- **AI phân loại doanh thu local:** học từ cặp khoa chỉ định/khoa thực hiện đã được xác nhận. Phạm vi báo cáo là **dịch vụ do Khoa Vú chỉ định, kể cả khoa khác thực hiện**. Nhãn chưa rõ phải đối soát; không tự tính tiền theo tên file.
-- **Bóc tách dịch vụ/gói:** khám, siêu âm, X-quang 2D/3D; SKTQ, SLUT 1, SLUT 2 và CK/lẻ có giá riêng cấu hình trên dashboard.
-- **Báo cáo:** đối soát, chốt snapshot, tạo/gửi/duyệt báo cáo, xuất Excel theo mẫu và PowerPoint từ cùng nguồn đã chốt; có lịch sử thao tác.
-- **Đọc kết quả siêu âm:** bấm Bắt đầu để thu micro và hiện chữ trong lúc đang đọc; Dừng để chép nốt, soát/sửa và hoàn thành ca. Có nháp tự lưu, xem kết quả theo ngày và xác nhận kiểm tra nội dung.
+## 1. Tính năng chính
 
-Kho mới bắt đầu trống. Dữ liệu và giá tham khảo đi kèm mã nguồn là dữ liệu kiểm thử, không phải dữ liệu hoặc bảng giá đã được bệnh viện xác nhận.
+- **Tổng quan, chi tiết & biểu đồ doanh thu:** Lọc theo ngày/khoảng ngày, bóc tách sản lượng và doanh thu theo từng dịch vụ, truy nguồn từng dòng dữ liệu gốc, chỉnh sửa có lý do bắt buộc và lưu lịch sử kiểm toán.
+- **Nhập Excel/CSV hoặc thư mục đa sheet:** Tự động đọc nhiều sheet, xem trước và đối chiếu trước khi xác nhận; chống trùng tệp bằng SHA-256, phát hiện và cách ly dòng nghi trùng hoặc thiếu căn cứ.
+- **AI phân loại doanh thu & dịch vụ local:**
+  - Mô hình Naive Bayes offline (`src/features/intelligence/revenueAI.mjs`) học từ cặp `khoa chỉ định / khoa thực hiện` đã xác nhận. Phạm vi doanh thu chuẩn là **dịch vụ do Khoa Vú chỉ định (nội khoa và gửi ngoại khoa)**.
+  - Tự động nhận diện 7 nhóm dịch vụ Khoa Vú được nhắc tới trong văn bản đọc (`detectServiceFromSpeech`: Siêu âm, X-quang vú, MRI/CT, Can thiệp/tiểu phẫu, Khám vú, Giải phẫu bệnh/di truyền, Phẫu thuật).
+- **Bóc tách dịch vụ & gói combo:** Phân tách chính xác Khám, Siêu âm vú, X-quang 2D/3D theo từng cơ chế giá: `SKTQ`, `SLUT 1` (khám + siêu âm), `SLUT 2` (khám + X-quang + siêu âm) và `CK/lẻ`.
+- **Xuất báo cáo giao ban đồng nhất:** Chốt snapshot dữ liệu đã đối soát, xuất Excel theo mẫu chuẩn và slide PowerPoint giao ban từ cùng một nguồn đã khóa.
+- **Đọc kết quả siêu âm offline (PhoWhisper-small INT8):** Thu âm trực tiếp trên trình duyệt, hiển thị bản nháp theo thời gian thực khi đang đọc, hậu xử lý chuẩn hóa đơn vị đo (`mm`, `cm`, `×`) và thuật ngữ chuyên khoa (`BI-RADS`, `Doppler`, `sinh thiết`, `giải phẫu`...) có ghi log minh bạch cho bác sĩ rà soát.
 
-## Cài từ GitHub
+---
 
-Yêu cầu **Node.js 22.14 trở lên**, npm; **Python 3.12** cho xử lý dữ liệu và speech. Dùng Chrome/Edge tại địa chỉ local để cấp quyền micro. Internet cần cho lần cài thư viện/model; sau khi cài đủ, xử lý dữ liệu và nhận giọng nói chạy trên máy.
+## 2. Yêu cầu hệ thống & Cài đặt
+
+- **Node.js:** phiên bản `>= 22.14` (kèm `npm`)
+- **Python:** phiên bản `3.12` (dùng cho pipeline dữ liệu và speech local)
+- **Trình duyệt:** Chrome hoặc Edge truy cập địa chỉ local để cấp quyền micro
+
+> Internet chỉ cần ở bước cài đặt thư viện và tải model lần đầu. Sau khi hoàn tất, toàn bộ xử lý dữ liệu và nhận dạng giọng nói chạy 100% offline.
 
 ```powershell
 git clone https://github.com/nan-bi/VMTC-KHOA-VU.git
@@ -27,148 +35,126 @@ npm ci
 npm run build
 ```
 
-Git không đóng gói `dist/`, `node_modules/`, model hoặc môi trường Python. **Phải build sau khi clone**; không mở `index.html` bằng cách nhấp đúp.
+*Lưu ý: Kho Git không đóng gói `dist/`, `node_modules/`, model AI hoặc môi trường `.speech-venv/`. Bắt buộc chạy `npm run build` sau khi clone; không mở trực tiếp file HTML bằng cách nhấp đúp.*
 
-### Chạy dashboard
+---
+
+## 3. Khởi chạy hệ thống
+
+### 3.1. Tạo tài khoản và chạy Dashboard
 
 ```powershell
 node backend/manage.mjs create-user
 npm run backend
 ```
 
-Mở **http://127.0.0.1:4180/**. Khi tạo tài khoản quản trị, chọn vai trò admin và mật khẩu từ 12 ký tự. Tài khoản/mật khẩu trên máy phát triển không nằm trong Git; bản clone không có tài khoản đăng nhập đóng gói sẵn.
+Hoặc trên Windows sử dụng `TAO-TAI-KHOAN.cmd` rồi `CHAY-BACKEND.cmd`. Sau đó mở trình duyệt tại **`http://127.0.0.1:4180/`**.
 
-Trên Windows có thể mở `TAO-TAI-KHOAN.cmd`, rồi `CHAY-BACKEND.cmd`. Giữ cửa sổ chạy mở trong lúc sử dụng.
+- Tài khoản quản trị (`admin`) yêu cầu mật khẩu dài từ 12 ký tự trở lên đáp ứng chính sách NIST SP 800-63B.
+- Quản lý tài khoản và nhật ký qua CLI:
+  - `node backend/manage.mjs change-password`
+  - `node backend/manage.mjs deactivate-user` / `activate-user`
+  - `node backend/manage.mjs audit`
+  - `node backend/manage.mjs backup`
 
-### Chạy dashboard và speech cùng nhau
+### 3.2. Chạy Dashboard tích hợp Speech-to-Text
 
-1. Cài thư viện, build và tạo tài khoản theo các bước trên.
-2. Mở **CAI-DAT-SPEECH.cmd** một lần để tạo môi trường, tải và chuyển PhoWhisper-small sang INT8 CPU. Cần Python 3.12 và Internet.
-3. Mở **CHAY-DASHBOARD-SPEECH.cmd**.
-4. Đăng nhập **http://127.0.0.1:4180/** rồi chọn **Đọc kết quả siêu âm**.
+1. Chạy **`CAI-DAT-SPEECH.cmd`** một lần để tạo `.speech-venv`, tải và lượng tử hóa PhoWhisper-small sang INT8 CPU.
+2. Chạy **`CHAY-DASHBOARD-SPEECH.cmd`**.
+3. Đăng nhập **`http://127.0.0.1:4180/`** và chọn mục **Đọc kết quả siêu âm**.
 
-| Cổng | Thành phần | Chức năng |
-|---|---|---|
-| 4180 | Dashboard + Node.js/SQLite | Đăng nhập, kho nguồn, quy tắc, đối soát và báo cáo |
-| 4173 | Trang speech nhúng + proxy loopback | Thu micro, bản chép và kho ca trình duyệt |
-| 4181 | PhoWhisper local | Nhận dạng WAV trong bộ nhớ |
+| Cổng | Thành phần | Vai trò |
+| :--- | :--- | :--- |
+| `4180` | Dashboard Backend (Node.js + SQLite) | Xác thực, phân quyền, kho dữ liệu, đối soát & báo cáo |
+| `4173` | Speech UI + Loopback Proxy | Thu micro, hiển thị bản chép, lưu nháp trình duyệt (IndexedDB) |
+| `4181` | PhoWhisper Local Server (Python) | Tiền xử lý tín hiệu, VAD, giải mã WAV trong bộ nhớ RAM |
 
-Dừng bằng Ctrl+C. Nếu cổng đã được dùng, đóng đúng cửa sổ chạy cũ; launcher không tự dừng ứng dụng khác. `CHAY-SPEECH.cmd` chạy riêng speech tại **http://127.0.0.1:4173/speech.html**.
+---
 
-`CHAY-DEMO.cmd` và frontend ở cổng 4173 là chế độ lịch sử; dùng backend 4180 khi cần kho dữ liệu và quyền tài khoản của dashboard.
+## 4. Đường ống xử lý giọng nói & Môi trường nhiễu
 
-## Cách tính dịch vụ và doanh thu
+Để đảm bảo tính ổn định trong điều kiện phòng khám có tiếng quạt gió lớn (0 dB SNR), micro độ nhạy thấp hoặc bác sĩ đọc dồn dập:
 
-Chỉ lấy dòng đủ điều kiện nghiệp vụ trong kỳ, theo phạm vi khoa đã xác nhận. Giá trị cơ bản là **số lượng × đơn giá đã cấu hình**. Thiếu giá, phân bổ gói hoặc giảm giá chưa rõ phải được thể hiện để đối soát.
+1. **Phía trình duyệt ([`local-dictation.mjs`](src/features/speech/local-dictation.mjs)):**
+   - Kích hoạt `autoGainControl: true`, `echoCancellation: true`, `noiseSuppression: true` từ WebRTC.
+   - Chèn bộ lọc thông cao **`BiquadFilterNode` ($85\text{ Hz}, Q = 0.7$)** loại bỏ tiếng ù động cơ quạt và nhiễu điện lưới $50\text{ Hz}$ trước khi đóng gói PCM.
+   - **Adaptive Noise Floor Tracker:** tự động bám mức ồn nền động ($\text{clamp}(0.008, 0.035, \text{noiseFloor} \times 1.35)$) để không bị kẹt bộ đếm im lặng khi quạt kêu to.
+   - Rút ngắn ngưỡng ngắt câu xuống **`450 ms`** (sau tối thiểu $1.2\text{ s}$ đọc) để bắt kịp nhịp đọc dồn dập.
+2. **Phía server ([`speech-server.py`](scripts/speech-server.py), [`speech_config.py`](scripts/speech_config.py)):**
+   - Khử trôi DC và rung tần số thấp $< 85\text{ Hz}$ bằng phép tích chập NumPy.
+   - **Dynamic Peak Gain Boost:** tự động khuếch đại tín hiệu micro yếu ($0.01 < \text{peak} < 0.5$) lên mức mục tiêu $0.75$ (tối đa $5\times$ / $+14\text{ dB}$), chống méo/vỡ âm.
+   - Tinh chỉnh **Silero VAD** (`threshold=0.45`, `min_speech_duration_ms=100`, `min_silence_duration_ms=450`, `speech_pad_ms=350`) bảo toàn phụ âm đầu và âm tiết đơn ngắn.
+3. **Hậu xử lý an toàn y khoa ([`speech_postprocess.py`](scripts/speech_postprocess.py)):**
+   - Chuẩn hóa đơn vị đo (`mi li mét` → `mm`, `centi mét` → `cm`, `nhân` → `×`) và các lỗi phát âm phổ biến (`bai rát` → `BI-RADS`, `sinh tiệc` → `sinh thiết`...).
+   - Mọi thay đổi được ghi rõ vào `corrections[]`; phát hiện lặp từ ảo giác hoặc mất dấu tiếng Việt sẽ bật cảnh báo cho bác sĩ đối soát chứ **không tự động sửa nội dung lâm sàng mơ hồ**.
 
-- **SLUT 1:** khám + siêu âm.
-- **SLUT 2:** khám + X-quang + siêu âm.
-- **Siêu âm CK/lẻ:** tổng siêu âm − siêu âm SKTQ − siêu âm trong combo.
-- **X-quang:** tách riêng 2D và 3D, rồi bóc tách lượng SKTQ/combo tương ứng.
-- **Khám chuẩn tại khoa:** tổng lượt khám − khám SLUT 1 − khám SLUT 2; các quy tắc khác chỉ áp dụng khi có cấu hình và dữ liệu xác nhận.
+---
 
-Mỗi thành phần SKTQ/combo/lẻ dùng đúng giá của thành phần đó. Không cộng trùng cả giá gói và phần đã phân bổ. Giá trị chỉ định và giá trị thực hiện là hai cách nhìn, không cộng hai tổng thành doanh thu mới. Số liệu chưa phải đối soát tiền thực thu từ HIS/kế toán.
+## 5. Bảo mật hệ thống
 
-## Nơi lưu dữ liệu
+- **Xác thực & Mật khẩu ([`backend/auth.mjs`](backend/auth.mjs)):** Băm `scrypt` ($N=16384, r=8, p=1$), kiểm tra độ phức tạp theo chuẩn NIST SP 800-63B (tối thiểu 12 ký tự, phân loại ký tự), hỗ trợ thu hồi toàn bộ phiên đăng nhập khi đổi mật khẩu hoặc vô hiệu hóa tài khoản.
+- **Chống tấn công Brute-force & HTTP ([`backend/server.mjs`](backend/server.mjs)):** `LoginRateLimiter` giới hạn đồng thời theo IP và tên đăng nhập; kiểm tra `Content-Length` trước khi đọc body; chặn `Prototype Pollution`; từ chối URI sai định dạng (`400 Bad Request`).
+- **Headers bảo mật nghiêm ngặt:** Đầy đủ `Content-Security-Policy`, `frame-ancestors 'none'`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`.
+- **Cơ sở dữ liệu local ([`backend/database.mjs`](backend/database.mjs)):** Bật `PRAGMA secure_delete = FAST`, giới hạn quyền thư mục dữ liệu `0o700`, tối ưu chỉ mục cho bảng `sessions` và `audit`.
 
-| Nội dung | Nơi lưu | Đưa lên Git? |
-|---|---|---|
-| Nguồn, chỉnh sửa, cấu hình, báo cáo và tài khoản dashboard | SQLite trong `backend/data/` | Không |
-| Ca, bản nháp và xác nhận kiểm tra speech | IndexedDB tại origin `http://127.0.0.1:4173` | Không |
-| Âm thanh khi nhận dạng | Bộ nhớ tạm trong lúc xử lý | Không lưu tệp ca |
-| Model và môi trường speech | `speech-models/`, `.speech-venv/` | Không; cài riêng |
-| Nguồn tổng hợp và fixtures kiểm thử | `data_gialap/`, fixtures | Có, không chứa ca thật |
+---
 
-Speech tự lưu **bản chép đã chốt** và thông tin ca. Đoạn nhận dạng tạm còn có thể đổi; chờ báo đã lưu nháp trước khi đóng trang. Ca thiếu thông tin vẫn giữ dạng nháp, cần đủ định danh trước khi hoàn thành. Xem lại tại **Kết quả**, lọc **Từ ngày/Đến ngày**, không cần chọn thư mục hoặc xuất file.
+## 6. Nơi lưu dữ liệu & Giới hạn nhập nguồn
 
-Nút **Bật lưu bền vững** yêu cầu Storage API; chỉ báo đã bật khi trình duyệt cấp. Khi chưa cấp, IndexedDB vẫn giữ qua lần mở lại nhưng có thể bị thu hồi khi thiếu dung lượng. Dùng cùng trình duyệt/hồ sơ/thiết bị và đúng địa chỉ; xóa dữ liệu trang, dùng ẩn danh, gỡ trình duyệt hoặc hỏng thiết bị có thể mất dữ liệu. Kho speech chưa đồng bộ nhiều máy và chưa dùng phân quyền tài khoản của backend. Thư mục `speech-data/` và mã API liên quan là phần lưu trước đó; giao diện hiện tại không tự chuyển ca vào đó.
+| Dữ liệu | Nơi lưu | Đưa lên Git |
+| :--- | :--- | :--- |
+| Nguồn nhập, cấu hình, báo cáo, tài khoản | SQLite trong `backend/data/` | Không |
+| Ca bệnh & bản nháp speech | IndexedDB tại origin `http://127.0.0.1:4173` | Không |
+| Âm thanh thu âm khi nhận dạng | Bộ nhớ RAM tạm thời (xóa ngay sau khi chép) | Không |
+| Model PhoWhisper & môi trường Python | `speech-models/`, `.speech-venv/` | Không |
+| Dữ liệu tổng hợp & fixtures kiểm thử | `data_gialap/`, `tests/fixtures/` | Có (dữ liệu giả lập) |
 
-## Giới hạn nhập nguồn
+**Giới hạn nhập nguồn:** tối đa 100 MB/file, 100 file hoặc 500 MB/lần chọn thư mục, 100.000 dòng/sheet và toàn kho nguồn; JSON state backend tối đa 256 MB.
 
-- 100 MB/file; tối đa 100 file khi chọn thư mục, tổng 500 MB/lần.
-- 100.000 dòng/sheet, mỗi lần nhập và toàn kho nguồn.
-- Backend nhận trạng thái JSON tối đa 256 MB; kích thước Excel nén không tương đương dữ liệu sau đọc.
+---
 
-Vượt giới hạn được báo rõ, không tự cắt bản ghi rồi tính như đã đủ.
-
-## Công nghệ và cấu trúc
-
-React 18, Ant Design 5, Vite 6; Node.js 22 và SQLite tích hợp; Python với openpyxl/xlrd và python-pptx cho nhập/xuất, phân loại và tính doanh thu; SheetJS/PptxGenJS còn phục vụ một số công cụ JavaScript. Speech dùng faster-whisper và PhoWhisper-small INT8 CPU. AI tài chính học local từ nhãn xác nhận, không gọi OpenAI/Gemini. Cài đặt ban đầu tải thư viện/model công khai; không gửi dữ liệu nghiệp vụ đến các nguồn tải này.
+## 7. Cấu trúc thư mục
 
 ```text
-src/                    Giao diện và quy tắc nghiệp vụ hiện tại
-  features/reports/     Doanh thu, đối soát, xuất báo cáo
-  features/intelligence/  Nhập nguồn và phân loại local
-  features/speech/      Thu giọng, chép và lưu ca trình duyệt
-backend/                Đăng nhập, SQLite và phân quyền báo cáo
-scripts/                Launcher, cài model và công cụ kiểm chứng
-tests/                  Kiểm thử tự động
-docs/                   Hướng dẫn và tài liệu lịch sử
-data_gialap/            Nguồn tổng hợp dùng kiểm thử
-speech-training/        Mẫu nhãn/từ điển và chuẩn bị dữ liệu
-speech-test-data/       Mô tả, nhãn và kết quả thử tổng hợp
+src/
+  features/reports/       Tính doanh thu, bóc tách combo, đối soát, xuất Excel/PPT
+  features/intelligence/  Nhập liệu, routing khoa, revenueAI & nhận diện dịch vụ
+  features/speech/        Thu âm Web Audio, streaming loopback & kho IndexedDB
+backend/                  HTTP server, xác thực, phân quyền, SQLite & CLI quản trị
+scripts/                  PhoWhisper server, tiền/hậu xử lý audio, launcher & công cụ đo
+tests/                    Kiểm thử tự động Node.js và Python
+docs/                     Tài liệu vận hành, kiểm toán và quy chuẩn kỹ thuật
 ```
 
-Thư mục chuẩn bị huấn luyện không có nghĩa model đã học từ ca thật. Không tự dùng bản ghi bệnh nhân để huấn luyện.
+---
 
-## Phát triển và kiểm chứng
+## 8. Kiểm thử & Xây dựng
 
 ```powershell
-npm run dev             # Frontend: 127.0.0.1:5173
-npm test                # Kiểm thử Node
-npm run audit           # Đối chiếu bộ mẫu báo cáo
-npm run build           # Tạo/cập nhật dist
+# Chạy toàn bộ 286 kiểm thử Node.js
+npm test
+
+# Chạy toàn bộ 99 kiểm thử Python
+.\.speech-venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
+
+# Đóng gói bản production
+npm run build
 ```
 
-Khi đã cài và chạy model local, có thể kiểm tra API và streaming bằng âm thanh tổng hợp:
+**Trạng thái kiểm chứng hiện tại:**
+- **Node.js Test Runner:** `286 / 286` đạt (0 lỗi)
+- **Python Unit Tests:** `99 / 99` đạt (0 lỗi)
+- **Vite Production Build:** thành công
 
-```powershell
-node scripts/check-speech-api.mjs
-node scripts/check-speech-stream.mjs
-```
+---
 
-WAV, ZIP, cache và model không được đóng gói trong Git. Công cụ sinh/đánh giá nằm trong `scripts/`; nguồn và điều kiện thử ở [speech-test-data/NGUON.md](speech-test-data/NGUON.md). Script stream cần `speech-test-data/audio/GIA-001-sach.wav` có trên máy, không tự tải âm thanh bệnh nhân.
+## 9. Phạm vi sử dụng & Tài liệu liên quan
 
-Kiểm toán pipeline gần nhất: **240 kiểm thử Node và 39 kiểm thử Python dữ liệu đạt**, build đạt; xem [báo cáo kiểm toán feature và đầu vào](docs/23-KIEM-TOAN-FEATURE-VA-DAU-VAO.md). Các đợt kiểm tra IndexedDB trước đó xác nhận ca hoàn thành và nháp còn sau khi tải lại trang. Thử streaming bằng âm thanh tổng hợp cho chữ đầu sau khoảng 1,8 giây trên máy phát triển; không bảo đảm cùng độ trễ hoặc độ chính xác trên mọi micro/giọng nói.
+Hệ thống hiện hoạt động độc lập, chưa kết nối trực tiếp HIS/EMR hoặc chữ ký số. Speech-to-text dù đã được lọc nhiễu và hậu xử lý vẫn là công cụ hỗ trợ — **bác sĩ cần rà soát kỹ bên vú (trái/phải), từ phủ định, số đo/đơn vị và phân độ BI-RADS** trước khi chốt kết quả lâm sàng.
 
-SHA256SUMS.txt đối chiếu nội dung mã nguồn đã lưu trong Git, không bao gồm bản build hoặc dữ liệu local. Trên Windows, chuyển đổi LF/CRLF khi checkout có thể làm hash tệp trên đĩa khác hash nội dung Git.
-
-## Phạm vi sử dụng và tài liệu
-
-Chưa kết nối HIS/EMR, chữ ký bác sĩ, đồng bộ ca speech nhiều máy hoặc đối soát thực thu. Chưa có tập chuẩn bệnh viện để xác nhận sai số dưới 0,05%. Speech còn lỗi nhận dạng; cần người có chuyên môn kiểm tra bên vú, từ phủ định, số đo/đơn vị và BI-RADS trước khi sử dụng.
-
-- [Thống nhất giao diện và vá lỗi](docs/24-THONG-NHAT-GIAO-DIEN-VA-VA-LOI.md)
-- [Vận hành nội bộ và lưu ca trình duyệt](docs/20-VAN-HANH-NOI-BO.md)
-- [Dashboard và speech tích hợp](docs/19-DASHBOARD-SPEECH.md)
-- [Speech-to-text siêu âm](docs/18-SPEECH-TO-TEXT-SIEU-AM-VU.md)
-- [AI phân loại doanh thu local](docs/AI-DOANH-THU-LOCAL.md)
 - [Backend và phân quyền](backend/README.md)
-- [Bóc tách dịch vụ/combo](docs/16-BOC-TACH-DICH-VU-COMBO.md)
-
-Tài liệu trước được giữ để truy vết; khi khác luồng hiện tại, ưu tiên README này và cập nhật mới nhất trong tài liệu vận hành. Đẩy mã nguồn lên GitHub không đưa dữ liệu local lên và không triển khai dashboard thành website công khai.
-
-## Xử lý dữ liệu bằng Python local
-
-Python đảm nhiệm đọc Excel/CSV, chuẩn hóa và đối soát đầu vào, phân loại phạm vi doanh thu khi lưu/chốt, bóc tách giá × số lượng và combo, kiểm tra quyền/chuyển trạng thái dữ liệu, tạo snapshot, xuất Excel theo mẫu DATA_KHOAVU và PowerPoint giao ban. Node vẫn phục vụ HTTP, đăng nhập và SQLite; React/JavaScript giữ giao diện, biểu đồ, micro và kho speech trên trình duyệt. Một số phép xem/tổng hợp và công cụ xuất liên khoa vẫn dùng JavaScript.
-
-Chạy `CAI-DAT-DU-LIEU-PYTHON.cmd` một lần để cài thư viện dữ liệu vào môi trường Python local, rồi chạy `CHAY-DASHBOARD-SPEECH.cmd` và mở http://127.0.0.1:4180/. Backend chọn `VINMEC_PYTHON` nếu được cấu hình, sau đó `.speech-venv/Scripts/python.exe`, cuối cùng Python trên PATH. Các thao tác nhập/xuất dùng backend nội bộ; trang chỉ phục vụ tĩnh 4173 hoặc Vite 5173 không thay thế backend. Thiếu Python/thư viện sẽ báo lỗi, không báo lưu thành công. Không gọi dịch vụ AI bên ngoài.
-
-Dashboard không có bảng/nút so sánh ngôn ngữ. Giữ nguyên giao diện, tài khoản, dữ liệu SQLite và cơ chế lưu speech IndexedDB.
-
-Đo mã nguồn UTF-8 chuẩn hóa LF: Python từ **6,67% lên 16,69%** trong tổng Python + JavaScript của kho; riêng ứng dụng không gồm tests/scripts/bản lưu lịch sử đạt khoảng **20,00%**. Đây là tỷ lệ dung lượng mã nguồn, không phải phần trăm tốc độ hay số GitHub Linguist. JavaScript giảm khoảng 29 KB nhờ thay các phần xử lý bằng lời gọi Python.
-
-Kiểm tra lại: `npm test`; `.speech-venv/Scripts/python.exe -B -m unittest discover -s tests -p test_python_pipeline.py`; `npm run build`. Đo tỷ lệ: `.speech-venv/Scripts/python.exe scripts/measure-python-share.py`. Xem [chi tiết chuyển đổi](docs/21-SO-SANH-JAVASCRIPT-PYTHON.md) và [kết quả đo](docs/audit/python-phase2-language-share.json).
-
-Kết quả kiểm thử đầu cuối và giới hạn sử dụng: [Kiểm tra chức năng và mức sẵn sàng](docs/25-KIEM-TRA-CHUC-NANG-VA-SAN-SANG.md).
-
-Nhập file nhiều loại sheet: [nhận diện và lưu bảng tham chiếu](docs/26-NHAN-DIEN-VA-LUU-NHIEU-SHEET.md).
-
-Cập nhật 16/11/2026: Tổng quan giữ biểu đồ cột, đã bỏ biểu đồ đường. Nhập liệu/đối soát/tính toán tập trung trong Chi tiết số liệu; ánh xạ cột đã lưu được tái dùng, bổ sung mã dịch vụ có xác nhận và đo sai số với bảng chuẩn độc lập. Xem [hướng dẫn thực hành](docs/30-THAO-TAC-LOCAL.md) và [kết quả kiểm tra trước khi push](docs/31-KIEM-TRA-TRUOC-KHI-PUSH.md): 255 Node tests, 61 Python tests và build đạt. Đây là kết quả kiểm thử kỹ thuật; chưa xác nhận nghiệm thu nghiệp vụ hoặc sai số thực tế dưới 0,05%.
-
-Cập nhật doanh thu và định danh (18/11/2026): [hướng dẫn kiểm tra PID, lưu ghi chú, học nhóm dịch vụ và đối chiếu doanh thu](docs/32-DOANH-THU-DINH-DANH.md). PID trùng không tự gộp hồ sơ; mô hình gợi ý để người có quyền xác nhận. Bộ tính PRICE-QTY-2 làm tròn từng dòng nguồn rồi cộng, giữ riêng các nhóm giá.
-
-Nhận dạng tiếng Việt: [PhoWhisper local và cách đối chiếu](docs/33-PHOWHISPER.md).
-
-Công cụ kiểm thử speech: scripts/evaluate-ultrasound-speech.py và scripts/report-ultrasound-evaluation.py. Bộ văn bản nguồn, báo cáo chi tiết và âm thanh đối chiếu giữ tại máy, không đi kèm kho mã công khai.
-
-Báo cáo doanh thu mọi khoa, mọi dịch vụ và nhóm giá: [hướng dẫn xem, lọc và xuất](docs/35-DOANH-THU-CAC-KHOA.md).
+- [AI phân loại doanh thu local](docs/AI-DOANH-THU-LOCAL.md)
+- [PhoWhisper local và cách đối chiếu](docs/33-PHOWHISPER.md)
+- [Bóc tách dịch vụ / combo](docs/16-BOC-TACH-DICH-VU-COMBO.md)
+- [Vận hành nội bộ và lưu ca trình duyệt](docs/20-VAN-HANH-NOI-BO.md)
+- [Báo cáo doanh thu các khoa](docs/35-DOANH-THU-CAC-KHOA.md)

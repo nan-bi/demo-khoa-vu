@@ -20,12 +20,17 @@ export function calculationInput(rows,config={}){
  });
  return {rows:clean,config:Object.fromEntries(['rates','serviceKinds','packageTypes'].filter(k=>config[k]!=null).map(k=>[k,config[k]]))};
 }
+function safeEnv(){
+ const allowed=['PATH','PATHEXT','SYSTEMROOT','TEMP','TMP','COMSPEC','USERPROFILE','WINDIR','APPDATA','LOCALAPPDATA'];
+ const safe={};for(const k of allowed)if(process.env[k]!==undefined)safe[k]=process.env[k];
+ return {...safe,PYTHONIOENCODING:'utf-8',PYTHONDONTWRITEBYTECODE:'1',PYTHONUNBUFFERED:'1'};
+}
 export function runPythonRevenue(payload,{python=process.env.VINMEC_PYTHON||(existsSync(bundled)?bundled:'python'),timeout=20000}={}){
  if(running>=2)return Promise.reject(fail(429,'Đang chạy hai phép tính Python. Thử lại sau.'));
  const body=JSON.stringify(payload);if(Buffer.byteLength(body)>32*1024*1024)return Promise.reject(fail(413,'Phép tính vượt 32 MB.'));
  running++;
  return new Promise((resolve,reject)=>{
-  const started=performance.now(),child=spawn(python,['-I',script],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...process.env,PYTHONIOENCODING:'utf-8',PYTHONDONTWRITEBYTECODE:'1'}});
+  const started=performance.now(),child=spawn(python,['-I',script],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:safeEnv()});
   const chunks=[];let size=0,done=false;
   const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);running--;if(error){child.kill();reject(error);}else resolve({...value,totalMs:Math.round((performance.now()-started)*1000)/1000});};
   const timer=setTimeout(()=>finish(fail(503,'Python xử lý quá thời gian. Giữ phép tính JavaScript.')),timeout);

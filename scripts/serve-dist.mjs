@@ -7,9 +7,26 @@ const root=fileURLToPath(new URL('../dist/',import.meta.url));
 const speechTestRoot=fileURLToPath(new URL('../speech-test-data/',import.meta.url));
 const port=4173;
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.svg':'image/svg+xml','.woff2':'font/woff2','.ttf':'font/ttf','.ico':'image/x-icon','.wav':'audio/wav','.csv':'text/csv; charset=utf-8','.md':'text/plain; charset=utf-8'};
+const SPEECH_CSP=[
+ "default-src 'self'",
+ "script-src 'self'",
+ "style-src 'self' 'unsafe-inline'",
+ "img-src 'self' data: blob:",
+ "font-src 'self' data:",
+ "connect-src 'self' http://127.0.0.1:4180 http://localhost:4180",
+ "media-src 'self' blob:",
+ "object-src 'none'",
+ "base-uri 'self'",
+ "form-action 'self'",
+ "frame-ancestors 'self' http://127.0.0.1:4180 http://localhost:4180"
+].join('; ');
 if(Number(process.versions.node.split('.')[0])<22){console.error('Please install Node.js 22 or later: https://nodejs.org/');process.exit(1);}
 try{await stat(path.join(root,'index.html'));}catch{console.error('Missing dist/index.html. Run npm ci and npm run build first.');process.exit(1);}
 const server=http.createServer(async(req,res)=>{
+ res.setHeader('Content-Security-Policy',SPEECH_CSP);
+ res.setHeader('Permissions-Policy','camera=(), geolocation=(), payment=(), usb=(), microphone=(self)');
+ res.setHeader('Referrer-Policy','same-origin');
+ res.setHeader('X-Content-Type-Options','nosniff');
  if(req.url?.startsWith('/speech-data/')){
   const origin=req.headers.origin;
   if(req.headers.host!==String('127.0.0.1:'+port)||(origin&&origin!=='http://127.0.0.1:'+port)||req.headers['sec-fetch-site']==='cross-site'){res.writeHead(403).end();return;}
@@ -42,6 +59,7 @@ const server=http.createServer(async(req,res)=>{
  if(!['GET','HEAD'].includes(req.method)){res.writeHead(405,{'Allow':'GET, HEAD'}).end();return;}
  try{
   const pathname=decodeURIComponent(new URL(req.url,'http://127.0.0.1').pathname);
+  if(pathname.includes('\0')){res.writeHead(400).end('Bad request');return;}
   const isSpeechTest=pathname.startsWith('/speech-test/');
   const selectedRoot=isSpeechTest?speechTestRoot:root;
   const localPath=isSpeechTest?(pathname.slice('/speech-test'.length)==='/'?'/index.html':pathname.slice('/speech-test'.length)):(pathname==='/'?'/index.html':pathname==='/speech-dashboard.html'?'/speech.html':pathname);

@@ -25,9 +25,9 @@ function record(value){
 }
 function draft(value){id(value.id);id(value.owner);state(value.state);stamp(value.updatedAt);if(value.state.savedId)fail(400,'Bản nháp đã hoàn thành.');return value;}
 export function openSpeechStore(filename){
- mkdirSync(path.dirname(filename),{recursive:true});
+ mkdirSync(path.dirname(filename),{recursive:true,mode:0o700});
  const db=new DatabaseSync(filename);
- db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS results(id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,time TEXT NOT NULL,actor TEXT NOT NULL,action TEXT NOT NULL);');
+ db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA secure_delete=FAST; CREATE TABLE IF NOT EXISTS results(id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,time TEXT NOT NULL,actor TEXT NOT NULL,action TEXT NOT NULL); CREATE INDEX IF NOT EXISTS idx_events_time ON events(time DESC);');
  const get=(table,key)=>{const row=db.prepare('SELECT payload FROM '+table+' WHERE id=?').get(key);return row?JSON.parse(row.payload):null;};
  const list=table=>db.prepare('SELECT payload FROM '+table).all().map(row=>JSON.parse(row.payload));
  function put(table,value){db.prepare('INSERT INTO '+table+'(id,payload) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(value.id,JSON.stringify(value));}

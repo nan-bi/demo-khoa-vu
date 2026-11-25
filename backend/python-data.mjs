@@ -6,6 +6,11 @@ const bundled=fileURLToPath(new URL('../.speech-venv/Scripts/python.exe',import.
 const fail=(status,message)=>Object.assign(Error(message),{status});
 let running=0;
 export const PUBLIC_TASKS=new Set(['department-revenue','finance-review','service-suggestions','identity-review','revenue','calculation','scope','aggregate','validate','ingest','prepare-import','evaluate-quality','template-model','template-workbook','meeting-model','meeting-presentation','snapshot']);
+function safeEnv(){
+ const allowed=['PATH','PATHEXT','SYSTEMROOT','TEMP','TMP','COMSPEC','USERPROFILE','WINDIR','APPDATA','LOCALAPPDATA'];
+ const safe={};for(const k of allowed)if(process.env[k]!==undefined)safe[k]=process.env[k];
+ return {...safe,PYTHONIOENCODING:'utf-8',PYTHONDONTWRITEBYTECODE:'1',PYTHONUNBUFFERED:'1'};
+}
 export function runPythonData(action,payload,{python=process.env.VINMEC_PYTHON||(existsSync(bundled)?bundled:'python'),timeout=120000}={}){
  if(running>=2)return Promise.reject(fail(429,'Đang xử lý dữ liệu Python. Thử lại sau.'));
  if(!payload||typeof payload!=='object'||Array.isArray(payload))return Promise.reject(fail(400,'Cấu trúc tác vụ không hợp lệ.'));
@@ -13,7 +18,7 @@ export function runPythonData(action,payload,{python=process.env.VINMEC_PYTHON||
  const body=JSON.stringify({action,payload});if(Buffer.byteLength(body)>256*1024*1024)return Promise.reject(fail(413,'Tác vụ Python vượt 256 MB.'));
  running++;
  return new Promise((resolve,reject)=>{
-  const started=performance.now(),child=spawn(python,['-I',script],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...process.env,PYTHONIOENCODING:'utf-8',PYTHONDONTWRITEBYTECODE:'1'}});
+  const started=performance.now(),child=spawn(python,['-I',script],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:safeEnv()});
   const chunks=[];let size=0,done=false;
   const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);running--;if(error){child.kill();reject(error);}else resolve({...value,totalMs:Math.round((performance.now()-started)*1000)/1000});};
   const timer=setTimeout(()=>finish(fail(503,'Python xử lý quá thời gian; dữ liệu chưa được lưu.')),timeout);

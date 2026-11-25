@@ -68,19 +68,45 @@ Các lần ghi chạy trong transaction SQLite và kiểm tra revision; nguồn 
 
 | Phương thức | Đường dẫn | Chức năng |
 |---|---|---|
-| GET | /api/health | Kiểm tra máy chủ, chưa lộ dữ liệu nghiệp vụ |
-| POST | /api/auth/login | Đăng nhập |
+| GET | /api/health | Kiểm tra máy chủ, trả trạng thái và cờ setupRequired, không lộ dữ liệu |
+| POST | /api/auth/login | Đăng nhập (giới hạn brute-force theo cả IP và tên tài khoản) |
 | GET | /api/auth/session | Người dùng/CSRF/hạn phiên |
-| POST | /api/auth/logout | Thu hồi phiên |
+| POST | /api/auth/change-password | Người dùng đổi mật khẩu hiện tại (thu hồi phiên cũ) |
+| POST | /api/auth/logout | Thu hồi phiên làm việc |
 | GET / PUT | /api/workspace | Đọc/ghi trạng thái kèm expectedRevision |
 | GET | /api/catalog | Danh mục dịch vụ |
 | GET / PUT | /api/reviews | Đọc/gán nhãn, khóa revision riêng |
 | GET | /api/snapshots | Danh sách snapshot đã duyệt |
-| GET | /api/snapshots/:id | Snapshot cụ thể |
-| GET / POST | /api/admin/users | Liệt kê/tạo tài khoản, admin |
-| GET | /api/admin/audit?before=ID | Nhật ký 100 sự kiện/trang, admin |
+| GET | /api/snapshots/:id | Snapshot cụ thể (bảo vệ ký tự đặc biệt/mã hóa URL) |
+| GET / POST | /api/admin/users | Liệt kê / tạo tài khoản (admin) |
+| PATCH | /api/admin/users/:id | Bật/tắt tài khoản (active), cập nhật vai trò (admin) |
+| POST | /api/admin/users/:id/reset-password | Đặt lại mật khẩu tài khoản (admin) |
+| GET | /api/admin/audit?before=ID | Nhật ký hệ thống 100 sự kiện/trang (admin) |
 
-Phiên dùng cookie HttpOnly, SameSite=Strict; request ghi cần cùng origin và `X-CSRF-Token`. Token CSRF lấy từ login/session; không lưu token đăng nhập trong localStorage. Đăng nhập sai bị giới hạn theo IP (10 lần/15 phút, bộ đếm trong RAM). Dashboard kiểm tra cập nhật chung mỗi 10 giây. Phiên hết hạn cần đăng nhập lại. Chưa có đổi/quên mật khẩu, MFA, phân quyền theo phòng, phân trang nguồn trên server hoặc nền tảng huấn luyện model tự động.
+Phiên dùng cookie HttpOnly, SameSite=Strict; request ghi cần cùng origin và `X-CSRF-Token`. Token CSRF lấy từ login/session; không lưu token đăng nhập trong localStorage. Đăng nhập sai bị giới hạn kép theo IP và username (10 lần/15 phút, tự dọn dẹp bộ đếm). Toàn bộ HTTP headers bảo mật nâng cao được áp dụng: Content-Security-Policy (CSP), Permissions-Policy, Cross-Origin-Opener-Policy, Cross-Origin-Resource-Policy, X-Frame-Options: DENY và X-Content-Type-Options: nosniff. Cơ sở dữ liệu SQLite kích hoạt `PRAGMA secure_delete=FAST` đảm bảo dữ liệu nhạy cảm đã xóa được ghi đè vật lý trên đĩa.
+
+## Quản trị và Lệnh dòng lệnh (CLI)
+
+```powershell
+# Tạo tài khoản mới (mật khẩu >= 12 ký tự, kết hợp nhóm ký tự)
+node backend/manage.mjs create-user
+
+# Đổi mật khẩu tài khoản
+node backend/manage.mjs change-password
+
+# Khóa / kích hoạt tài khoản
+node backend/manage.mjs deactivate-user <username>
+node backend/manage.mjs activate-user <username>
+
+# Xem danh sách tài khoản
+node backend/manage.mjs users
+
+# Xem nhật ký kiểm toán (audit log) gần nhất
+node backend/manage.mjs audit 50
+
+# Sao lưu cơ sở dữ liệu an toàn (VACUUM INTO)
+node backend/manage.mjs backup "D:/VinMecBackup/vinmec-backup.sqlite"
+```
 
 ## Sao lưu và khôi phục
 

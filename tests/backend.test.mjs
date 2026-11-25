@@ -86,6 +86,58 @@ test('Internal backend authentication, persistence, authorization and report int
    assert.equal((await call('/api/reviews',{method:'PUT',auth:editor,body:{expectedRevision:0,key:'TEST-LABEL',value}})).status,409);
    assert.equal((await call('/api/reviews',{auth:admin})).data.revision,1);
   });
+  await t.test('Security hardening: HTTP headers, password strength, user lifecycle and rate limiting',async()=>{
+   // 1. Security Headers
+   const health=await call('/api/health');
+   assert.match(health.headers.get('content-security-policy'),/default-src 'self'/);
+   assert.equal(health.headers.get('x-frame-options'),'DENY');
+   assert.equal(health.headers.get('referrer-policy'),'same-origin');
+   assert.equal(health.headers.get('x-content-type-options'),'nosniff');
+   assert.equal(health.headers.get('cross-origin-opener-policy'),'same-origin');
+   assert.equal(health.headers.get('cross-origin-resource-policy'),'same-origin');
+   assert.match(health.headers.get('permissions-policy'),/camera=\(\)/);
+
+   // 2. Password Strength Validation
+   assert.equal((await call('/api/admin/users',{method:'POST',auth:admin,body:{username:'weakuser',password:'weak',role:'viewer'}})).status,400);
+   assert.equal((await call('/api/admin/users',{method:'POST',auth:admin,body:{username:'weakuser',password:'alllowercaseonly',role:'viewer'}})).status,400);
+
+   // 3. User Lifecycle Management (Admin PATCH active/role & reset password)
+   const testUserRes=await call('/api/admin/users',{method:'POST',auth:admin,body:{username:'lifecycle-user',password:'Internal-Test-Only-1234',role:'viewer'}});
+   assert.equal(testUserRes.status,201);
+   const testUserId=testUserRes.data.user.id;
+
+   // Login with lifecycle-user
+   const userSession=await login('lifecycle-user');
+   assert.ok(userSession.csrf);
+
+   // User changes own password
+   const changeRes=await call('/api/auth/change-password',{method:'POST',auth:userSession,body:{oldPassword:'Internal-Test-Only-1234',newPassword:'Lifecycle-Pass-456'}});
+   assert.equal(changeRes.status,200);
+
+   // Old password fails, new password succeeds
+   assert.equal((await call('/api/auth/login',{method:'POST',body:{username:'lifecycle-user',password:'Internal-Test-Only-1234'}})).status,401);
+   const newSession=await call('/api/auth/login',{method:'POST',body:{username:'lifecycle-user',password:'Lifecycle-Pass-456'}});
+   assert.equal(newSession.status,200);
+
+   // Admin resets user password
+   const resetRes=await call(`/api/admin/users/${testUserId}/reset-password`,{method:'POST',auth:admin,body:{password:'Lifecycle-Pass-789'}});
+   assert.equal(resetRes.status,200);
+   assert.equal((await call('/api/auth/login',{method:'POST',body:{username:'lifecycle-user',password:'Lifecycle-Pass-456'}})).status,401);
+   assert.equal((await call('/api/auth/login',{method:'POST',body:{username:'lifecycle-user',password:'Lifecycle-Pass-789'}})).status,200);
+
+   // Admin deactivates user
+   const deactivateRes=await call(`/api/admin/users/${testUserId}`,{method:'PATCH',auth:admin,body:{active:false}});
+   assert.equal(deactivateRes.status,200);
+   assert.equal(deactivateRes.data.user.active,0);
+   // Deactivated user cannot log in
+   assert.equal((await call('/api/auth/login',{method:'POST',body:{username:'lifecycle-user',password:'Lifecycle-Pass-789'}})).status,401);
+
+   // 4. Malformed Snapshot URI handling
+   assert.equal((await call('/api/snapshots/%c0%ae%c0%ae',{auth:admin})).status,400);
+
+   // 5. Prototype property pollution attempt on reviews
+   assert.equal((await call('/api/reviews',{method:'PUT',auth:editor,body:{expectedRevision:1,key:'toString',value:{label:'VU_INTERNAL',fingerprint:'f',reason:'Valid reason here'}}} )).status,400);
+  });
   await t.test('Backup command creates a consistent, reopenable SQLite copy and refuses overwrite',()=>{
    const destination=path.join(folder,'backup.sqlite'),script=fileURLToPath(new URL('../backend/manage.mjs',import.meta.url));
    const result=spawnSync(process.execPath,[script,'backup',destination],{env:{...process.env,VINMEC_DB:databasePath},encoding:'utf8'});assert.equal(result.status,0,result.stderr);

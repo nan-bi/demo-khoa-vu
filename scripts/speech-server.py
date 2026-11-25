@@ -3,6 +3,7 @@ import io
 import json
 import os
 import secrets
+import sys
 import threading
 import time
 import wave
@@ -15,7 +16,9 @@ os.environ['TRANSFORMERS_OFFLINE'] = '1'
 from faster_whisper import WhisperModel
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
 from speech_config import profile, model_path, decode_options
+from speech_postprocess import postprocess
 PROFILE = profile()
 MODEL_PATH = model_path(PROFILE)
 KEY = os.environ['VU_VOICE_KEY']
@@ -62,19 +65,31 @@ def transcribe(data, final=True):
     started = time.perf_counter()
     segments, _ = model.transcribe(samples, **decode_options(final))
     decoded = list(segments)
-    text = ' '.join(s.text.strip() for s in decoded).strip()
-    quality = assess_quality(decoded, text)
+    raw_text = ' '.join(s.text.strip() for s in decoded).strip()
+
+    # Post-process: normalize medical terminology and measurement units.
+    # Corrections are logged for physician review; clinical text is never
+    # silently altered without an explicit, deterministic, logged rule.
+    post = postprocess(raw_text) if final else {'text': raw_text, 'corrections': [], 'flags': []}
+    text = post['text']
+
+    quality = assess_quality(decoded, text, post['flags'])
     return {'text': text, 'seconds': round(time.perf_counter() - started, 3),
             'model': state['model'], 'revision': PROFILE['revision'], 'final': final,
             'needs_review': quality['needs_review'], 'quality': quality['level'],
-            'quality_reason': quality['reason']}
+            'quality_reason': quality['reason'],
+            'corrections': post['corrections'],
+            'raw_text': raw_text if post['corrections'] else None}
 
 
-def assess_quality(segments, text):
+def assess_quality(segments, text, postprocess_flags=None):
     """Surface uncertainty; never rewrite clinical terms automatically."""
     if not text.strip():
         return {'level': 'silent', 'needs_review': True,
                 'reason': 'Không phát hiện lời đọc rõ ràng hoặc đoạn chỉ có im lặng.'}
+    if postprocess_flags:
+        return {'level': 'caution', 'needs_review': True,
+                'reason': 'Hậu xử lý phát hiện bất thường: ' + '; '.join(postprocess_flags)}
     probs = [getattr(segment, 'no_speech_prob', None) for segment in segments]
     probs = [prob for prob in probs if isinstance(prob, (int, float))]
     log_probs = [getattr(segment, 'avg_logprob', None) for segment in segments]

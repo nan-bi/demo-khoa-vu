@@ -44,9 +44,35 @@ def transcribe(data, final=True):
             raise ValueError('Audio duration out of range')
     started = time.perf_counter()
     segments, _ = model.transcribe(io.BytesIO(data), **decode_options(final))
-    text = ' '.join(s.text.strip() for s in segments).strip()
+    decoded = list(segments)
+    text = ' '.join(s.text.strip() for s in decoded).strip()
+    quality = assess_quality(decoded, text)
     return {'text': text, 'seconds': round(time.perf_counter() - started, 3),
-            'model': state['model'], 'revision': PROFILE['revision'], 'final': final}
+            'model': state['model'], 'revision': PROFILE['revision'], 'final': final,
+            'needs_review': quality['needs_review'], 'quality': quality['level'],
+            'quality_reason': quality['reason']}
+
+
+def assess_quality(segments, text):
+    """Surface uncertainty; never rewrite clinical terms automatically."""
+    if not text.strip():
+        return {'level': 'silent', 'needs_review': True,
+                'reason': 'Không phát hiện lời đọc rõ ràng hoặc đoạn chỉ có im lặng.'}
+    probs = [getattr(segment, 'no_speech_prob', None) for segment in segments]
+    probs = [prob for prob in probs if isinstance(prob, (int, float))]
+    log_probs = [getattr(segment, 'avg_logprob', None) for segment in segments]
+    log_probs = [prob for prob in log_probs if isinstance(prob, (int, float))]
+    ratios = [getattr(segment, 'compression_ratio', None) for segment in segments]
+    ratios = [ratio for ratio in ratios if isinstance(ratio, (int, float))]
+    if ((probs and max(probs) >= 0.60)
+            or (log_probs and max(log_probs) < -1.20)
+            or (ratios and max(ratio for ratio in ratios) >= 2.40)):
+        return {'level': 'low', 'needs_review': True,
+                'reason': 'Đoạn có tín hiệu nhận dạng không ổn định; phải soát kỹ bên, phủ định, số đo và đơn vị.'}
+    if probs and max(probs) >= 0.35:
+        return {'level': 'caution', 'needs_review': True,
+                'reason': 'Có khả năng im lặng hoặc từ không rõ; kiểm tra lại đoạn nhận dạng.'}
+    return {'level': 'ok', 'needs_review': False, 'reason': ''}
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):

@@ -56,4 +56,17 @@ class PhoWhisperTests(unittest.TestCase):
         self.assertEqual(calls[-1]['beam_size'], 5)
         with self.assertRaises((wave.Error, EOFError)): server.transcribe(b'not wav')
 
+    def test_quality_gate_surfaces_uncertainty_without_rewriting_text(self):
+        fake = types.ModuleType('faster_whisper')
+        fake.WhisperModel = object
+        with patch.dict(sys.modules, {'faster_whisper': fake}), patch.dict(os.environ, {'VU_VOICE_KEY':'unit-test-only'}):
+            spec = importlib.util.spec_from_file_location('speech_server_quality_test', ROOT / 'scripts/speech-server.py')
+            server = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(server)
+        uncertain = types.SimpleNamespace(no_speech_prob=0.7, avg_logprob=-0.2, compression_ratio=1.1)
+        quality = server.assess_quality([uncertain], 'Vú trái không thấy khối.')
+        self.assertTrue(quality['needs_review'])
+        self.assertEqual(quality['level'], 'low')
+        self.assertEqual(server.assess_quality([], '')['level'], 'silent')
+
 if __name__ == '__main__': unittest.main()

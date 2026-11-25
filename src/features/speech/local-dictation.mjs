@@ -9,7 +9,7 @@ export function wavBlob(samples,sampleRate){
 }
 
 export function createLocalDictation({onText,onInterim,onState,onNotice,
- fetcher=fetch,mediaDevices=navigator.mediaDevices,AudioContextClass=window.AudioContext}){
+ fetcher=fetch,mediaDevices=navigator.mediaDevices,AudioContextClass=window.AudioContext,onQuality=()=>{}}){
  let context,stream,source,processor,mute,frames=[],length=0,silence=0,queue=[],working=false,recording=false,failed=false,disposed=false,starting=false,generation=0;
  let segment=0,lastPreviewLength=0,previewSegment=null;
  const state=value=>{if(!disposed)onState(value);};
@@ -42,6 +42,9 @@ export function createLocalDictation({onText,onInterim,onState,onNotice,
      // Never deduplicate words: repetitions or corrections may be intentional.
      if(previewSegment===task.id){onInterim('');previewSegment=null;}
      if(text)onText(text);
+     if(task.final&&result.needs_review){
+      onQuality({level:result.quality||'low',reason:result.quality_reason||'Đoạn nhận dạng cần bác sĩ kiểm tra.'});
+     }
      queue.shift();
     }else{previewSegment=task.id;onInterim(text);}
    }catch(e){

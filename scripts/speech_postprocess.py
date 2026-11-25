@@ -41,22 +41,15 @@ _TIMES_PATTERN = re.compile(
 # ---------------------------------------------------------------------------
 _TERM_CORRECTIONS: list[tuple[re.Pattern, str]] = [
     # Bi-rad / BI-RADS scoring
-    (re.compile(r'\bbai\s*rát\b', re.I), 'BI-RADS'),
-    (re.compile(r'\bbai\s*rat\b', re.I), 'BI-RADS'),
-    (re.compile(r'\bbirát\b', re.I), 'BI-RADS'),
-    (re.compile(r'\bbirat\b', re.I), 'BI-RADS'),
+    (re.compile(r'\b(?:bai\s*r[aá]t|bir[aá]t)\b', re.I), 'BI-RADS'),
     # Ultrasound modalities
     (re.compile(r'\bsiêu\s+am\b', re.I), 'siêu âm'),
-    (re.compile(r'\bdóp\s*ple\b', re.I), 'Doppler'),
-    (re.compile(r'\bdóp\s*pơ\b', re.I), 'Doppler'),
-    (re.compile(r'\bdôp\s*ple\b', re.I), 'Doppler'),
+    (re.compile(r'\b(?:dóp\s*ple|dóp\s*pơ|dôp\s*ple)\b', re.I), 'Doppler'),
     # Tissue / pathology
-    (re.compile(r'\bsinh\s+ti[eệ][tc]\b', re.I | re.UNICODE), 'sinh thiết'),
-    (re.compile(r'\bsinh\s+tiết\b', re.I), 'sinh thiết'),
-    (re.compile(r'\bgiai\s+phẫu\b', re.I), 'giải phẫu'),
-    (re.compile(r'\bgiai\s+phẩu\b', re.I), 'giải phẫu'),
+    (re.compile(r'\bsinh\s+ti(?:[eệ][tc]|ết)\b', re.I | re.UNICODE), 'sinh thiết'),
+    (re.compile(r'\bgiai\s+ph[ẫẩ]u\b', re.I), 'giải phẫu'),
     # Laterality (high-risk; only correct obvious phonetic swaps)
-    (re.compile(r'\bphải\s+trái\b', re.I), 'phải-trái'),   # keeps both, adds dash
+    (re.compile(r'\bphải\s+trái\b', re.I), 'phải-trái'),
     # Common clinical abbreviations spoken phonetically
     (re.compile(r'\blành\s+tin\b', re.I), 'lành tính'),
     (re.compile(r'\bkhôi\b', re.I), 'khối'),

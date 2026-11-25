@@ -13,6 +13,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import speech_config
 
+def _load_speech_server(module_name):
+    fake = types.ModuleType('faster_whisper')
+    fake.WhisperModel = object
+    with patch.dict(sys.modules, {'faster_whisper': fake}), patch.dict(os.environ, {'VU_VOICE_KEY': 'unit-test-only'}):
+        spec = importlib.util.spec_from_file_location(module_name, ROOT / 'scripts/speech-server.py')
+        server = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(server)
+    return server
+
 class PhoWhisperTests(unittest.TestCase):
     def test_pinned_profile(self):
         self.assertEqual(speech_config.CONFIG['default'], 'small')
@@ -34,12 +43,7 @@ class PhoWhisperTests(unittest.TestCase):
             self.assertNotIn('initial_prompt', opts)
 
     def test_server_preserves_raw_text_and_validates_wav(self):
-        fake = types.ModuleType('faster_whisper')
-        fake.WhisperModel = object
-        with patch.dict(sys.modules, {'faster_whisper': fake}), patch.dict(os.environ, {'VU_VOICE_KEY':'unit-test-only'}):
-            spec = importlib.util.spec_from_file_location('speech_server_test', ROOT / 'scripts/speech-server.py')
-            server = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(server)
+        server = _load_speech_server('speech_server_test')
         calls = []
         def transcribe(audio, **kwargs):
             calls.append(kwargs)
@@ -58,12 +62,7 @@ class PhoWhisperTests(unittest.TestCase):
         with self.assertRaises((wave.Error, EOFError)): server.transcribe(b'not wav')
 
     def test_quality_gate_surfaces_uncertainty_without_rewriting_text(self):
-        fake = types.ModuleType('faster_whisper')
-        fake.WhisperModel = object
-        with patch.dict(sys.modules, {'faster_whisper': fake}), patch.dict(os.environ, {'VU_VOICE_KEY':'unit-test-only'}):
-            spec = importlib.util.spec_from_file_location('speech_server_quality_test', ROOT / 'scripts/speech-server.py')
-            server = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(server)
+        server = _load_speech_server('speech_server_quality_test')
         uncertain = types.SimpleNamespace(no_speech_prob=0.7, avg_logprob=-0.2, compression_ratio=1.1)
         quality = server.assess_quality([uncertain], 'Vú trái không thấy khối.')
         self.assertTrue(quality['needs_review'])
@@ -79,12 +78,7 @@ class PhoWhisperTests(unittest.TestCase):
         self.assertEqual(vad['speech_pad_ms'], 350)
 
     def test_audio_preprocessing_gain_and_filter(self):
-        fake = types.ModuleType('faster_whisper')
-        fake.WhisperModel = object
-        with patch.dict(sys.modules, {'faster_whisper': fake}), patch.dict(os.environ, {'VU_VOICE_KEY':'unit-test-only'}):
-            spec = importlib.util.spec_from_file_location('speech_server_prep_test', ROOT / 'scripts/speech-server.py')
-            server = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(server)
+        server = _load_speech_server('speech_server_prep_test')
         captured = []
         def transcribe(samples, **kwargs):
             captured.append(samples)

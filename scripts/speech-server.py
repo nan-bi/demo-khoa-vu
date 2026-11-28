@@ -152,6 +152,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -183,7 +185,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(429, {'error': 'Máy đang chép ở tab khác. Đợi rồi thử lại.'})
         try:
             self.connection.settimeout(20)
-            result = transcribe(self.rfile.read(length), final=self.headers.get('X-Vu-Final', '1') != '0')
+            payload = self.rfile.read(length)
+            if len(payload) != length:
+                return self.reply(400, {'error': 'Đoạn âm thanh không đầy đủ.'})
+            result = transcribe(payload, final=self.headers.get('X-Vu-Final', '1') != '0')
             self.reply(200, result)
         except (ValueError, wave.Error, EOFError):
             self.reply(400, {'error': 'Đoạn âm thanh không hợp lệ.'})

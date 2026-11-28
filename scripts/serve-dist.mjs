@@ -20,6 +20,10 @@ const SPEECH_CSP=[
  "form-action 'self'",
  "frame-ancestors 'self' http://127.0.0.1:4180 http://localhost:4180"
 ].join('; ');
+function isSameOriginLocal(req,expectedPort){
+ const origin=req.headers.origin;
+ return req.headers.host===`127.0.0.1:${expectedPort}`&&(!origin||origin===`http://127.0.0.1:${expectedPort}`)&&req.headers['sec-fetch-site']!=='cross-site';
+}
 if(Number(process.versions.node.split('.')[0])<22){console.error('Please install Node.js 22 or later: https://nodejs.org/');process.exit(1);}
 try{await stat(path.join(root,'index.html'));}catch{console.error('Missing dist/index.html. Run npm ci and npm run build first.');process.exit(1);}
 const server=http.createServer(async(req,res)=>{
@@ -27,9 +31,10 @@ const server=http.createServer(async(req,res)=>{
  res.setHeader('Permissions-Policy','camera=(), geolocation=(), payment=(), usb=(), microphone=(self)');
  res.setHeader('Referrer-Policy','same-origin');
  res.setHeader('X-Content-Type-Options','nosniff');
+ res.setHeader('Cross-Origin-Opener-Policy','same-origin');
  if(req.url?.startsWith('/speech-data/')){
+  if(!isSameOriginLocal(req,port)){res.writeHead(403).end();return;}
   const origin=req.headers.origin;
-  if(req.headers.host!==String('127.0.0.1:'+port)||(origin&&origin!=='http://127.0.0.1:'+port)||req.headers['sec-fetch-site']==='cross-site'){res.writeHead(403).end();return;}
   const op=req.url.slice('/speech-data/'.length),read=['session','results','drafts'].includes(op);
   if(!['session','results','drafts','save-draft','restore-draft','complete','review','migrate'].includes(op)||req.method!==(read?'GET':'POST')){res.writeHead(404).end();return;}
   const length=Number(req.headers['content-length']||0);
@@ -40,8 +45,7 @@ const server=http.createServer(async(req,res)=>{
   req.pipe(upstream);return;
  }
  if(req.url?.startsWith('/speech-api/')){
-  const origin=req.headers.origin;
-  if(req.headers.host!==`127.0.0.1:${port}`||(origin&&origin!==`http://127.0.0.1:${port}`)||req.headers['sec-fetch-site']==='cross-site'){
+  if(!isSameOriginLocal(req,port)){
    res.writeHead(403).end();return;
   }
   const route=req.url.slice('/speech-api'.length);

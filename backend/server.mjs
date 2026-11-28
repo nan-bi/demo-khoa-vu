@@ -51,7 +51,7 @@ class LoginRateLimiter{
  reset(key){this.attempts.delete(key);}
 }
 
-function send(res,status,data,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(JSON.stringify(data));}
+function send(res,status,data,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Pragma':'no-cache','X-Content-Type-Options':'nosniff',...headers});res.end(JSON.stringify(data));}
 async function body(req,limit){
  const cl=Number(req.headers['content-length']);
  if(Number.isFinite(cl)&&cl>limit)throw new HttpError(413,'Nội dung vượt giới hạn.');
@@ -75,11 +75,13 @@ export async function createBackend({databasePath=path.join(project,'backend/dat
   res.setHeader('Cross-Origin-Opener-Policy','same-origin');
   res.setHeader('Cross-Origin-Resource-Policy','same-origin');
   res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  res.setHeader('X-Permitted-Cross-Domain-Policies','none');
   if(secureCookie)res.setHeader('Strict-Transport-Security','max-age=31536000; includeSubDomains');
   try{
    const host=req.headers.host||'';
    if(!host||/[\r\n\0\s]/.test(host)||host.length>256)throw new HttpError(400,'Host header không hợp lệ.');
    const url=new URL(req.url,'http://localhost'),route=url.pathname;
+   if(route.startsWith('/api/')&&req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'Yêu cầu cross-site bị chặn.');
    // No CORS: browser mutations must come from the same origin as the dashboard.
    if(!['GET','HEAD'].includes(req.method)){
     if(!req.headers.origin||new URL(req.headers.origin).host!==req.headers.host)throw new HttpError(403,'Nguồn yêu cầu không hợp lệ.');

@@ -1,31 +1,42 @@
 import {scryptSync,randomBytes,timingSafeEqual,createHash} from 'node:crypto';
 import {audit,transaction} from './database.mjs';
+
 export const ROLES=['admin','editor','reviewer','viewer'];
+const SCRYPT_OPTS={N:16384,r:8,p:1,maxmem:32*1024*1024};
+const MAX_SESSIONS_PER_USER=5;
+
 export const hashToken=token=>createHash('sha256').update(token).digest('hex');
 
 export function validatePassword(password){
  if(typeof password!=='string'||password.length<12||password.length>256)throw Error('Mật khẩu cần 12–256 ký tự.');
  if(password.trim().length<12)throw Error('Mật khẩu không được chỉ gồm khoảng trắng.');
- const hasLower=/[a-z]/.test(password);
- const hasUpper=/[A-Z]/.test(password);
- const hasDigit=/[0-9]/.test(password);
- const hasSpecial=/[^a-zA-Z0-9]/.test(password);
- const classes=[hasLower,hasUpper,hasDigit,hasSpecial].filter(Boolean).length;
+ const classes=[/[a-z]/,/[A-Z]/,/[0-9]/,/[^a-zA-Z0-9]/].filter(re=>re.test(password)).length;
  if(classes<2)throw Error('Mật khẩu cần kết hợp ít nhất 2 nhóm: chữ thường, chữ hoa, số hoặc ký tự đặc biệt.');
  return true;
 }
 
 export function hashPassword(password){
  const salt=randomBytes(16).toString('hex');
- const hash=scryptSync(password,salt,64,{N:16384,r:8,p:1,maxmem:32*1024*1024}).toString('hex');
+ const hash=scryptSync(password,salt,64,SCRYPT_OPTS).toString('hex');
  return `${salt}:${hash}`;
 }
 
 export function verifyPassword(password,passwordHash){
  if(typeof password!=='string'||password.length>256)return false;
- const [salt,hash]=(passwordHash||`${'0'.repeat(32)}:${'0'.repeat(128)}`).split(':');
- const actual=scryptSync(password,salt,64,{N:16384,r:8,p:1,maxmem:32*1024*1024}),expected=Buffer.from(hash,'hex');
- return timingSafeEqual(actual,expected);
+ const parts=typeof passwordHash==='string'?passwordHash.split(':'):[];
+ const validFormat=parts.length===2&&/^[a-f0-9]{32}$/.test(parts[0])&&/^[a-f0-9]{128}$/.test(parts[1]);
+ const salt=validFormat?parts[0]:'0'.repeat(32);
+ const expected=Buffer.from(validFormat?parts[1]:'0'.repeat(128),'hex');
+ const actual=scryptSync(password,salt,64,SCRYPT_OPTS);
+ return timingSafeEqual(actual,expected)&&validFormat;
+}
+
+function withUser(db,userId,fn){
+ return transaction(db,()=>{
+  const user=db.prepare('SELECT id,username FROM users WHERE id=?').get(userId);
+  if(!user)throw Error('Không tìm thấy người dùng.');
+  return fn(user);
+ });
 }
 
 export function createUser(db,{username,password,role='viewer'},performedBy=null){
@@ -50,8 +61,14 @@ export function authenticate(db,username,password){
 }
 
 export function createSession(db,user){
- const token=randomBytes(32).toString('hex'),csrf=randomBytes(24).toString('hex'),expires=Date.now()+8*60*60*1000;
- db.prepare('DELETE FROM sessions WHERE expires_at<?').run(Date.now());
+ const token=randomBytes(32).toString('hex'),csrf=randomBytes(24).toString('hex'),now=Date.now(),expires=now+8*60*60*1000;
+ db.prepare('DELETE FROM sessions WHERE expires_at<?').run(now);
+ const active=db.prepare('SELECT token_hash FROM sessions WHERE user_id=? ORDER BY expires_at ASC').all(user.id);
+ if(active.length>=MAX_SESSIONS_PER_USER){
+  for(const row of active.slice(0,active.length-MAX_SESSIONS_PER_USER+1)){
+   db.prepare('DELETE FROM sessions WHERE token_hash=?').run(row.token_hash);
+  }
+ }
  db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(hashToken(token),user.id,csrf,expires);
  return {token,csrf,expires,user};
 }
@@ -69,11 +86,8 @@ export function revokeUserSessions(db,userId){
 
 export function changePassword(db,userId,newPassword,performedBy=null){
  validatePassword(newPassword);
- return transaction(db,()=>{
-  const user=db.prepare('SELECT id,username FROM users WHERE id=?').get(userId);
-  if(!user)throw Error('Không tìm thấy người dùng.');
-  const passwordHash=hashPassword(newPassword);
-  db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash,userId);
+ return withUser(db,userId,user=>{
+  db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hashPassword(newPassword),userId);
   revokeUserSessions(db,userId);
   audit(db,performedBy||user,'PASSWORD_CHANGED',{targetUserId:userId,targetUsername:user.username});
   return {ok:true};
@@ -81,9 +95,7 @@ export function changePassword(db,userId,newPassword,performedBy=null){
 }
 
 export function setUserActive(db,userId,active,performedBy=null){
- return transaction(db,()=>{
-  const user=db.prepare('SELECT id,username FROM users WHERE id=?').get(userId);
-  if(!user)throw Error('Không tìm thấy người dùng.');
+ return withUser(db,userId,user=>{
   const status=active?1:0;
   db.prepare('UPDATE users SET active=? WHERE id=?').run(status,userId);
   if(status===0)revokeUserSessions(db,userId);
@@ -94,9 +106,7 @@ export function setUserActive(db,userId,active,performedBy=null){
 
 export function setUserRole(db,userId,role,performedBy=null){
  if(!ROLES.includes(role))throw Error('Vai trò không hợp lệ.');
- return transaction(db,()=>{
-  const user=db.prepare('SELECT id,username FROM users WHERE id=?').get(userId);
-  if(!user)throw Error('Không tìm thấy người dùng.');
+ return withUser(db,userId,user=>{
   db.prepare('UPDATE users SET role=? WHERE id=?').run(role,userId);
   revokeUserSessions(db,userId);
   audit(db,performedBy||user,'USER_ROLE_CHANGED',{targetUserId:userId,targetUsername:user.username,role});

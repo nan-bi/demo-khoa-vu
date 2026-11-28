@@ -14,6 +14,9 @@ def model_path(selected):
 def decode_options(final=True):
     return dict(language='vi', task='transcribe', beam_size=5 if final else 1,
                 temperature=0, condition_on_previous_text=False,
+                no_speech_threshold=0.55,
+                log_prob_threshold=-1.0,
+                compression_ratio_threshold=2.2,
                 vad_filter=True,
                 vad_parameters={'threshold': 0.45,
                                 'min_speech_duration_ms': 100,

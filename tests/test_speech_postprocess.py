@@ -101,6 +101,23 @@ class PostprocessTests(unittest.TestCase):
         self.assertIn('BI-RADS', r_north['text'])
         self.assertEqual(r_north['accent_region'], 'Bắc')
 
+    def test_real_voice_medical_terms_and_filler_locking(self):
+        r = postprocess("Em ghi tiếp nhé, tuyến vũ cháy có khối nhôm mô, cốp bô bình thường, bi đắt một. Hãy subscribe kênh.")
+        self.assertNotIn('Em ghi tiếp nhé', r['text'])
+        self.assertNotIn('subscribe', r['text'])
+        self.assertIn('tuyến vú trái', r['text'])
+        self.assertIn('nhu mô', r['text'])
+        self.assertIn('Cooper', r['text'])
+        self.assertIn('BI-RADS 1', r['text'])
+        self.assertGreaterEqual(len(r['blocked_terms']), 2)
+        self.assertGreater(r['medical_terms_matched'], 0)
+
+    def test_preserves_clinical_negation(self):
+        r = postprocess("Tuyến vú phải không thấy khối bất thường, không thấy hạch.")
+        self.assertIn('không thấy khối', r['text'])
+        self.assertIn('không thấy hạch', r['text'])
+        self.assertEqual(r['blocked_terms'], [])
+
 
 if __name__ == '__main__':
     unittest.main()

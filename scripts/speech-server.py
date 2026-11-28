@@ -39,6 +39,38 @@ def load_model():
     except Exception:
         state['error'] = 'Chưa nạp được model. Chạy CAI-DAT-SPEECH.cmd rồi mở lại.'
 
+def preprocess_audio(samples: np.ndarray) -> np.ndarray:
+    """Stabilize noisy clinic recordings: DC/rumble filter, soft noise-floor gate, gain boost, limiter."""
+    if not len(samples):
+        return samples
+    # 1. Attenuate low-frequency rumble and DC offset (fan motor / 50Hz AC hum < 85Hz)
+    if len(samples) >= 188:
+        rumble = np.convolve(samples, np.ones(188, dtype=np.float32) / 188.0, mode='same')
+        samples = samples - rumble
+
+    # 2. Soft RMS noise-floor gating (10ms frames = 160 samples at 16kHz)
+    frame_len = 160
+    n_frames = len(samples) // frame_len
+    if n_frames >= 10:
+        frames = samples[:n_frames * frame_len].reshape(n_frames, frame_len)
+        rms = np.sqrt(np.mean(frames * frames, axis=1))
+        noise_floor = float(np.percentile(rms, 15))
+        speech_level = float(np.percentile(rms, 90))
+        if 1e-4 < noise_floor < 0.08 and speech_level > noise_floor * 2.0:
+            # Smoothly attenuate frames near the stationary noise floor without hard-clipping speech
+            gain_mask = np.where(rms < noise_floor * 1.4, 0.30, 1.0).astype(np.float32)
+            samples = samples.copy()
+            samples[:n_frames * frame_len] = (frames * gain_mask[:, None]).reshape(-1)
+
+    # 3. Dynamic gain boost for weak microphones (peak amplitude < 0.5)
+    peak = float(np.max(np.abs(samples)))
+    if 0.01 < peak < 0.5:
+        samples = samples * min(0.75 / peak, 5.0)
+
+    # 4. Soft limiter above 0.95 to avoid harsh clipping
+    return np.clip(samples, -0.98, 0.98).astype(np.float32)
+
+
 def transcribe(data, final=True):
     # Only PCM WAV created by our client: mono, 16 kHz, at most 30 seconds.
     with wave.open(io.BytesIO(data), 'rb') as audio:
@@ -48,19 +80,7 @@ def transcribe(data, final=True):
         if not 0 < nframes <= 30 * 16000:
             raise ValueError('Audio duration out of range')
         raw_frames = audio.readframes(nframes)
-    # Convert PCM16 to float32 samples [-1.0, 1.0]
-    samples = np.frombuffer(raw_frames, dtype=np.int16).astype(np.float32) / 32768.0
-
-    # 1. Attenuate low-frequency rumble and DC offset (fan motor / 50Hz AC hum < 85Hz)
-    if len(samples) >= 188:
-        rumble = np.convolve(samples, np.ones(188, dtype=np.float32) / 188.0, mode='same')
-        samples = samples - rumble
-
-    # 2. Dynamic gain boost for weak microphones (peak amplitude < 0.5)
-    peak = float(np.max(np.abs(samples))) if len(samples) else 0.0
-    if 0.01 < peak < 0.5:
-        # Scale up to 0.75 target, capped at 5x (+14 dB) to prevent clipping
-        samples = samples * min(0.75 / peak, 5.0)
+    samples = preprocess_audio(np.frombuffer(raw_frames, dtype=np.int16).astype(np.float32) / 32768.0)
 
     started = time.perf_counter()
     segments, _ = model.transcribe(samples, **decode_options(final))
